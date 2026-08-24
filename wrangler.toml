@@ -1,0 +1,33 @@
+﻿name = "si-le-ma"
+main = "src/index.ts"
+compatibility_date = "2026-08-23"
+workers_dev = true
+
+# Custom domain (must match APP_BASE_URL below).
+routes = [
+  { pattern = "slm.liejiu.top", custom_domain = true }
+]
+
+[vars]
+# Public base URL used in emails/links. Custom domain is bound.
+APP_BASE_URL = "https://slm.liejiu.top"
+# Set via `wrangler secret put CRON_SECRET` if you want a manual POST /__cron trigger.
+# Set via `wrangler secret put RESEND_API_KEY` and optionally MAIL_FROM below for email delivery.
+
+[[d1_databases]]
+  binding = "DB"
+  database_name = "d1-db"
+  # Run `npx wrangler d1 create d1-db` and paste the returned id here.
+  database_id = "YOUR_D1_DATABASE_ID"
+
+# Native email delivery via Email Routing (free).
+# Recipients must be pre-verified in CF dashboard 鈫?Email Routing 鈫?Destination addresses.
+[[send_email]]
+  name = "SEND_EMAIL"
+
+[[r2_buckets]]
+  binding = "IMG"
+  bucket_name = "dead-mans-switch-images"
+
+[triggers]
+crons = ["*/5 * * * *"]

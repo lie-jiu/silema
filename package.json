@@ -1,0 +1,23 @@
+﻿{
+  "name": "silema",
+  "description": "死了吗（SiLeMa）— Dead Man's Switch check-in & notification system on Cloudflare Workers",
+  "license": "GPL-3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init": "wrangler d1 migrations apply d1-db",
+    "db:init:remote": "wrangler d1 migrations apply d1-db --remote"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "mimemessage": "^1.0.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.125.0"
+  }
+}
