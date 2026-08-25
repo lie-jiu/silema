@@ -1,4 +1,4 @@
-﻿name = "si-le-ma"
+name = "si-le-ma"
 main = "src/index.ts"
 compatibility_date = "2026-08-23"
 workers_dev = true
@@ -21,13 +21,9 @@ APP_BASE_URL = "https://slm.liejiu.top"
   database_id = "YOUR_D1_DATABASE_ID"
 
 # Native email delivery via Email Routing (free).
-# Recipients must be pre-verified in CF dashboard 鈫?Email Routing 鈫?Destination addresses.
+# Recipients must be pre-verified in CF dashboard -> Email Routing -> Destination addresses.
 [[send_email]]
   name = "SEND_EMAIL"
-
-[[r2_buckets]]
-  binding = "IMG"
-  bucket_name = "dead-mans-switch-images"
 
 [triggers]
 crons = ["*/5 * * * *"]

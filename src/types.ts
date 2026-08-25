@@ -4,7 +4,6 @@ export const VALID_CHANNELS: ChannelType[] = ["email", "telegram", "bark", "ntfy
 
 export interface Bindings {
   DB: D1Database;
-  IMG: R2Bucket;
   JWT_SECRET: string;
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD?: string;

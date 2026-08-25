@@ -234,35 +234,4 @@ recipients.post("/:id/test", async (c) => {
   return c.json({ message: `已发送 ${messages.length} 条测试消息` });
 });
 
-// POST /api/recipients/upload/image — upload to R2 (magic-byte validated),
-// returns /img/<key> for pasting into recipient content.
-recipients.post("/upload/image", async (c) => {
-  const formData = await c.req.formData();
-  const file = formData.get("image");
-  if (!(file instanceof File)) return c.json({ error: "Image required" }, 400);
-  if (file.size > 5 * 1024 * 1024) return c.json({ error: "Image too large (max 5MB)" }, 400);
-
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer.slice(0, 12));
-  const hex = Array.from(bytes.slice(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
-
-  let ext: string | null = null;
-  let contentType: string | null = null;
-  if (hex.startsWith("ffd8ff")) {
-    ext = "jpg"; contentType = "image/jpeg";
-  } else if (hex.startsWith("89504e47")) {
-    ext = "png"; contentType = "image/png";
-  } else if (hex.startsWith("47494638")) {
-    ext = "gif"; contentType = "image/gif";
-  } else if (hex.startsWith("52494646") && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") {
-    ext = "webp"; contentType = "image/webp";
-  }
-  if (!ext || !contentType) return c.json({ error: "Invalid image data" }, 400);
-
-  const key = `images/${crypto.randomUUID()}.${ext}`;
-  await c.env.IMG.put(key, buffer, { httpMetadata: { contentType } });
-
-  return c.json({ key, url: `/img/${key}` });
-});
-
 export default recipients;

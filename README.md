@@ -40,7 +40,6 @@
 |---|---|
 | 运行时 | Cloudflare Workers（Hono 框架） |
 | 数据库 | Cloudflare D1（SQLite） |
-| 图片存储 | Cloudflare R2 |
 | 定时任务 | Cron Triggers（`*/5 * * * *`） |
 | 邮件 | Resend HTTP API / Cloudflare Email Routing（`send_email` 绑定，二者皆可，自动选择） |
 
@@ -56,7 +55,6 @@ npm install
 
 # 1. 创建资源（如已有可跳过，并把 id 填入 wrangler.toml）
 npx wrangler d1 create d1-db
-npx wrangler r2 bucket create dead-mans-switch-images
 
 # 2. 应用数据库迁移
 npx wrangler d1 migrations apply d1-db --remote
@@ -118,7 +116,6 @@ npx wrangler dev                                # http://localhost:8787
 |---|---|
 | `/` | 公开状态页：未签到小时数 + 绿/黄/红/灰 四级指示，60 秒自动刷新 |
 | `/admin` | 管理后台：仪表盘、签到日历、通知接收人、设置（时区 / 签到周期） |
-| `/img/<key>` | R2 图片公开只读访问 |
 
 ## 通知渠道配置
 
@@ -276,7 +273,7 @@ App Store 安装 [Bark](https://apps.apple.com/app/bark-customed-notifications/i
 1. 所有 `server` / `url` 类字段强制 HTTPS，且拒绝私网段（127.x / 10.x / 172.16-31.x / 192.168.x / 169.254.x 等）
 2. 配置保存前服务端会做格式校验，不合法直接拒绝并提示原因
 3. 添加接收人后，先用行内 **测试** 按钮（按已配置内容真实发送）确认链路通畅，再依赖它做最后警告
-4. 每个接收人各自携带要发送的内容：勾选「警告开始」/「警告结束」时必须填写对应内容（首行=标题），可随时点行内铅笔按钮修改。Email 为 HTML、ntfy/Server酱为 Markdown、Telegram 为受限 HTML（`<b>`/`<i>`/`<a>`/`<code>`）、Bark 为纯文本；正文里可插入图片链接（表单内「插入图片链接」按钮上传至 R2）
+4. 每个接收人各自携带要发送的内容：勾选「警告开始」/「警告结束」时必须填写对应内容（首行=标题），可随时点行内铅笔按钮修改。Email 为 HTML、ntfy/Server酱为 Markdown、Telegram 为受限 HTML（`<b>`/`<i>`/`<a>`/`<code>`）、Bark 为纯文本；正文里可直接粘贴外部图片链接
 
 ## API 一览
 
@@ -294,7 +291,6 @@ App Store 安装 [Bark](https://apps.apple.com/app/bark-customed-notifications/i
 | GET/PUT | `/api/settings` | 时区 / 签到时限 / 警告期 / 上次签到时间 |
 | GET/POST | `/api/recipients` · PUT/DELETE `/api/recipients/:id` | 通知接收人管理（label / channelType / config / onWarning / onTrigger / warningContent / triggerContent，勾选的事件内容必填） |
 | POST | `/api/recipients/:id/test` | 按该接收人已配置的真实内容发送测试；删除时自动取消其排队消息 |
-| POST | `/api/recipients/upload/image` | multipart 上传图片（≤5MB，magic bytes 校验）→ `/img/<key>`，用于插入通知内容 |
 | POST | `/api/reset` | 复位状态机并取消该轮未投递消息 |
 | POST | `/__cron` | 手动触发状态机（需 `X-Cron-Secret`） |
 
@@ -307,7 +303,7 @@ src/
 ├── auth.ts         # 登录（用户名+密码+TOTP）+ 登录限流
 ├── checkin.ts      # 签到（冷却）+ 月历（时区感知）
 ├── cron.ts         # 状态机推进、警告下发、投递与重试、复位
-├── recipients.ts   # 通知接收人 CRUD + 按人内容 + 测试发送 + 图片上传
+├── recipients.ts   # 通知接收人 CRUD + 按人内容 + 测试发送
 ├── adapters.ts     # 六通道适配器 + SSRF 防护 + Resend 邮件
 ├── ratelimit.ts    # D1 固定窗口限流
 ├── crypto.ts       # 常量时间字符串比较（先哈希归一化长度）

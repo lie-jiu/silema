@@ -559,12 +559,10 @@
           <div class="form-group" id="warnContentGroup" style="display:none">
             <label for="rcptWarnContent">「警告开始」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题，<code>{deadline}</code>=确认截止时间</span></label>
             <textarea id="rcptWarnContent" rows="3" placeholder="⚠️ 你还好吗&#10;你已超过签到时限，请在 {deadline} 前登录确认平安"></textarea>
-            <button class="btn btn-outline btn-sm js-upimg" data-act="upimg" data-tgt="rcptWarnContent" type="button" style="margin-top:6px">插入图片链接</button>
           </div>
           <div class="form-group" id="trigContentGroup" style="display:none">
             <label for="rcptTrigContent">「警告结束」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题，<code>{time}</code>=触发时刻</span></label>
             <textarea id="rcptTrigContent" rows="3" placeholder="死了吗：主人失联了&#10;所有者超过时限未签到，于 {time} 触发本条预设消息"></textarea>
-            <button class="btn btn-outline btn-sm js-upimg" data-act="upimg" data-tgt="rcptTrigContent" type="button" style="margin-top:6px">插入图片链接</button>
           </div>
           <button class="btn btn-primary btn-sm" id="btnAddRcpt" type="button" style="margin-top:10px">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -710,16 +708,6 @@ function api(path,opts){
         return data;
       });
     });
-}
-function apiUpload(path,formData){
-  var headers={'Authorization':'Bearer '+token};
-  return fetch(path,{method:'POST',headers:headers,body:formData}).then(function(resp){
-    return resp.text().then(function(t){
-      var data=null;try{data=t?JSON.parse(t):null}catch(e){}
-      if(!resp.ok)throw{status:resp.status,message:(data&&data.error)||('HTTP '+resp.status)};
-      return data;
-    });
-  });
 }
 
 /* ---------- checkin buttons ---------- */
@@ -1054,23 +1042,6 @@ $('cmSave').addEventListener('click',function(){
 $('cmCancel').addEventListener('click',function(){$('contentModal').classList.remove('on')});
 $('contentModal').addEventListener('click',function(e){if(e.target===this)$('contentModal').classList.remove('on')});
 
-/* insert an uploaded image link into a target textarea */
-function upImg(tgt){
-  var inp=document.createElement('input');inp.type='file';inp.accept='image/*';
-  inp.addEventListener('change',function(){
-    var f=inp.files&&inp.files[0];if(!f)return;
-    toast('图片上传中…');
-    var fd=new FormData();fd.append('image',f);
-    apiUpload('/api/recipients/upload/image',fd).then(function(d){
-      var ta=$(tgt);
-      if(ta.value&&!/\\n$/.test(ta.value))ta.value+='\\n';
-      ta.value+=location.origin+d.url+'\\n';
-      toast('已插入图片链接');
-    }).catch(function(e){toast(e.message,'error')});
-  });
-  inp.click();
-}
-
 /* ---------- templates ---------- */
 /* ---------- settings ---------- */
 function loadSettings(){
@@ -1123,7 +1094,6 @@ document.addEventListener('click',function(e){
   if(act==='rcpt-edit')openContentModal(getRcpt(t.dataset.id),null);
   else if(act==='rcpt-test')testRcpt(t.dataset.id);
   else if(act==='rcpt-del')delRcpt(t.dataset.id);
-  else if(act==='upimg')upImg(t.dataset.tgt);
 });
 
 /* ---------- boot ---------- */

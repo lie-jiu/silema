@@ -23,27 +23,6 @@ app.onError((err, c) => {
 
 app.get("/", (c) => c.html(publicPage()));
 
-// R2 images are served read-only under /img/
-app.get("/img/*", async (c) => {
-  let key: string;
-  try {
-    key = decodeURIComponent(new URL(c.req.url).pathname.slice("/img/".length));
-  } catch {
-    return c.json({ error: "Not found" }, 404);
-  }
-  if (!/^images\/[0-9a-fA-F-]{36}\.(jpg|png|gif|webp)$/.test(key)) {
-    return c.json({ error: "Not found" }, 404);
-  }
-  const obj = await c.env.IMG.get(key);
-  if (!obj) return c.json({ error: "Not found" }, 404);
-  return new Response(obj.body, {
-    headers: {
-      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
-});
-
 app.get("/api/status", async (c) => {
   const owner = await c.env.DB.prepare(
     "SELECT last_checkin_at, state, expiry_hours FROM owner WHERE id = 1"
