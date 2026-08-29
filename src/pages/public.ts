@@ -160,6 +160,13 @@
 var CIRC=578.05;
 var LEVEL_TEXT={green:'一切正常 · 请继续保持签到',yellow:'注意 · 已超过一半时限',red:'警告 · 即将触发群发',dark:'已触发 · 预设消息已发出'};
 var STATE_TEXT={normal:'运行正常',warning:'警告期',triggered:'已触发'};
+/* 时间按所有者的时区显示，而非访问者本地时区 —— 否则跨境查看会误读 */
+var TZ='UTC';
+function clock(){
+  try{
+    return new Intl.DateTimeFormat('zh-CN',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+  }catch(e){return new Date().toLocaleTimeString()}
+}
 function $(id){return document.getElementById(id)}
 
 document.querySelectorAll('.js-theme').forEach(function(b){
@@ -176,6 +183,7 @@ $('gaugeFg').style.strokeDasharray=CIRC;
 function render(){
   fetch('/api/status').then(function(r){return r.json()}).then(function(d){
     var level=d.level||'green';
+    if(d.timezone)TZ=d.timezone;
     $('card').className='card level-'+level;
     document.title=level==='green'?'死了吗 · 平安':'死了吗 · '+(STATE_TEXT[d.state]||level);
     $('hours').textContent=(d.hoursSinceCheckin!=null?d.hoursSinceCheckin:'--');
@@ -183,7 +191,7 @@ function render(){
     $('gaugeFg').style.strokeDashoffset=(CIRC*(1-pct)).toFixed(2);
     $('chip').textContent=STATE_TEXT[d.state]||d.state||'--';
     $('stateDesc').textContent=LEVEL_TEXT[level]||'';
-    $('updated').textContent='更新于 '+new Date().toLocaleTimeString();
+    $('updated').textContent='更新于 '+clock();
   }).catch(function(){
     $('stateDesc').textContent='状态获取失败，60 秒后自动重试';
   });

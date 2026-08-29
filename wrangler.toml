@@ -17,8 +17,7 @@ APP_BASE_URL = "https://slm.liejiu.top"
 [[d1_databases]]
   binding = "DB"
   database_name = "d1-db"
-  # Run `npx wrangler d1 create d1-db` and paste the returned id here.
-  database_id = "YOUR_D1_DATABASE_ID"
+  database_id = "d95e62c2-2d62-4a15-9f46-5b2026070421"
 
 # Native email delivery via Email Routing (free).
 # Recipients must be pre-verified in CF dashboard -> Email Routing -> Destination addresses.

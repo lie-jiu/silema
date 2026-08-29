@@ -1,4 +1,13 @@
-﻿export function adminPage(): string {
+﻿import { placeholdersFor } from "../messages";
+
+// 注入到前端脚本里。用 JSON 而非手拼字符串，避免变量名里出现引号之类
+// 破坏 <script> 结构；JSON.stringify 产出的字符集在这里是安全的。
+const PLACEHOLDER_JSON = JSON.stringify({
+  warning: placeholdersFor("warning"),
+  trigger: placeholdersFor("trigger"),
+});
+
+export function adminPage(): string {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -333,6 +342,15 @@
     display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;
     background:var(--surface-2);color:var(--text-2);letter-spacing:.01em;
   }
+  /* ============ 投递记录 ============ */
+  .dl-row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .dl-row:last-child{border-bottom:none}
+  .dl-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px}
+  .dl-main{flex:1;min-width:0}
+  .dl-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .dl-meta{font-size:11.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+  .dl-err{font-size:11.5px;color:var(--red);margin-top:5px;word-break:break-word;line-height:1.6}
+  .dl-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--surface-2);color:var(--text-2)}
   .rcpt-cfg{
     display:block;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted);
     word-break:break-all;margin-top:3px;
@@ -390,6 +408,17 @@
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
   }
+  .ph-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+  .ph-label{font-size:11.5px;color:var(--muted);margin-right:2px;flex-shrink:0}
+  .ph-chip{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+    line-height:1.5;padding:3px 8px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--border);background:var(--surface-2);color:var(--text-2);
+    transition:border-color .15s,color .15s,transform .1s;
+  }
+  .ph-chip:hover{border-color:var(--primary);color:var(--primary)}
+  .ph-chip:active{transform:translateY(1px)}
+  .ph-chip.key{border-color:var(--primary);color:var(--primary);background:var(--primary-soft,transparent)}
 </style>
 </head>
 <body>
@@ -470,10 +499,6 @@
         <div class="header">
           <h2>仪表盘</h2>
           <div class="actions">
-            <button class="btn btn-outline" id="resetBtn" style="display:none" type="button">
-              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-              复位状态机
-            </button>
             <button class="btn btn-success js-checkin" type="button">
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
               <span class="js-label">立即签到</span>
@@ -487,8 +512,9 @@
         </div>
         <div class="banner trig" id="bannerTrig">
           <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span><b>已触发</b>：预设消息已发送给所有订阅接收人。处理完毕后请复位状态机。</span>
-          <button class="btn btn-sm" id="resetBtn2" type="button">立即复位</button>
+          <!-- 文案按真实投递结果渲染，见 renderTriggerBanner()：全部失败时必须说失败，
+               不能沿用「已发送给所有接收人」这种会误导人的固定说法 -->
+          <span id="bannerTrigTxt"></span>
         </div>
 
         <div class="stats" id="dashStats"></div>
@@ -500,6 +526,16 @@
           <div class="progress"><i id="dashBar"></i></div>
           <p class="hint" id="dashHint"></p>
         </div>
+
+        <div class="card">
+          <h3>
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            最近投递
+          </h3>
+          <div id="deliveryList"><div class="empty" style="padding:16px 0">加载中…</div></div>
+        </div>
+
+        <p class="hint" id="sysHealth" style="margin-top:14px"></p>
       </section>
 
       <!-- ======== 日历 ======== -->
@@ -557,12 +593,14 @@
             <label class="ckb"><input type="checkbox" id="rcptTrig" checked> 警告结束时通知（群发）</label>
           </div>
           <div class="form-group" id="warnContentGroup" style="display:none">
-            <label for="rcptWarnContent">「警告开始」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题，<code>{deadline}</code>=确认截止时间</span></label>
-            <textarea id="rcptWarnContent" rows="3" placeholder="⚠️ 你还好吗&#10;你已超过签到时限，请在 {deadline} 前登录确认平安"></textarea>
+            <label for="rcptWarnContent">「警告开始」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题</span></label>
+            <textarea id="rcptWarnContent" rows="3" placeholder="⚠️ 你还好吗&#10;你已超过签到时限，请在 {deadline} 前确认平安。&#10;&#10;点此一键签到：{checkin_url}"></textarea>
+            <div class="ph-row" id="phWarn"></div>
           </div>
           <div class="form-group" id="trigContentGroup" style="display:none">
-            <label for="rcptTrigContent">「警告结束」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题，<code>{time}</code>=触发时刻</span></label>
-            <textarea id="rcptTrigContent" rows="3" placeholder="死了吗：主人失联了&#10;所有者超过时限未签到，于 {time} 触发本条预设消息"></textarea>
+            <label for="rcptTrigContent">「警告结束」内容 <span class="req">*</span> <span style="font-weight:400;color:var(--muted)">首行=标题</span></label>
+            <textarea id="rcptTrigContent" rows="3" placeholder="死了吗：主人失联了&#10;所有者超过时限未签到，于 {time} 触发本条预设消息。&#10;上次签到：{last_checkin}"></textarea>
+            <div class="ph-row" id="phTrig"></div>
           </div>
           <button class="btn btn-primary btn-sm" id="btnAddRcpt" type="button" style="margin-top:10px">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -615,14 +653,18 @@
 <div class="overlay" id="contentModal" role="dialog" aria-modal="true">
   <div class="modal">
     <h3 id="cmTitle">编辑通知内容</h3>
-    <p class="hint" style="margin:-8px 0 14px">首行自动作为标题。仅勾选中的事件会被要求填写。</p>
+    <p class="hint" style="margin:-8px 0 14px">首行自动作为标题。点击下方变量可插入到光标处。<br>
+      <b>{checkin_url}</b> 会生成一条限时签到链接 —— 放在「警告开始」里是你自己一键签到；
+      放进「警告结束」则意味着<b>收到消息的人可以代你签到</b>，请只对可信联系人使用。</p>
     <div class="form-group">
-      <label for="cmWarn">「警告开始」内容 <span style="font-weight:400;color:var(--muted)">（<code>{deadline}</code>=确认截止时间）</span></label>
+      <label for="cmWarn">「警告开始」内容</label>
       <textarea id="cmWarn" rows="4"></textarea>
+      <div class="ph-row" id="phCmWarn"></div>
     </div>
     <div class="form-group">
-      <label for="cmTrig">「警告结束」内容 <span style="font-weight:400;color:var(--muted)">（<code>{time}</code>=触发时刻）</span></label>
+      <label for="cmTrig">「警告结束」内容</label>
       <textarea id="cmTrig" rows="4"></textarea>
+      <div class="ph-row" id="phCmTrig"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-outline" id="cmCancel" type="button">取消</button>
@@ -652,6 +694,32 @@
 /* ---------- utilities ---------- */
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+/* ---------- 消息变量占位符 ---------- */
+/* 由服务端注入，与 src/messages.ts 的 PLACEHOLDERS 同源 —— 加一个占位符
+ * 只改那一处，这里的提示与插入按钮自动跟着变。 */
+var PLACEHOLDERS=${PLACEHOLDER_JSON};
+
+function insertAtCursor(ta,text){
+  if(!ta)return;
+  var s=ta.selectionStart, e=ta.selectionEnd;
+  ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
+  ta.selectionStart=ta.selectionEnd=s+text.length;
+  ta.focus();
+}
+function renderPlaceholders(boxId,taId,scope){
+  var box=$(boxId);
+  if(!box)return;
+  var list=PLACEHOLDERS[scope]||[];
+  if(!list.length){box.innerHTML='';return}
+  box.innerHTML='<span class="ph-label">可用变量（点击插入）</span>'+
+    list.map(function(p){
+      var cls=p.name==='checkin_url'?'ph-chip key':'ph-chip';
+      return '<button type="button" class="'+cls+'" title="'+esc(p.desc)+'">{'+esc(p.name)+'}</button>';
+    }).join('');
+  box.querySelectorAll('.ph-chip').forEach(function(b){
+    b.addEventListener('click',function(){insertAtCursor($(taId),b.textContent)});
+  });
+}
 var TOAST_ICONS={
   success:'<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
   error:'<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
@@ -824,24 +892,109 @@ function loadDashboard(){
     bar.style.background=LEVEL_COLOR[st.level]||'#12a150';
     $('dashHint').textContent='时限 '+(cfg.expiry_hours||'?')+' 小时 · 警告期 '+(cfg.warning_hours||'?')+' 小时 · 时区 '+(cfg.timezone||'-');
 
-    var abnormal=(st.state==='warning'||st.state==='triggered');
-    $('resetBtn').style.display=abnormal?'inline-flex':'none';
     $('bannerWarn').classList.toggle('on',st.state==='warning');
     $('bannerTrig').classList.toggle('on',st.state==='triggered');
+
+    renderSysHealth(cfg);
+    loadDeliveries(st.state||'normal');
   }).catch(function(e){if(e.status!==401){toast('加载失败：'+e.message,'error');$('dashStats').innerHTML='<div class="empty" style="flex:1">数据加载失败</div>'}});
 }
-function doReset(){
-  api('/api/reset',{method:'POST'}).then(function(){
-    toast('状态机已复位，未投递的排队消息已取消');loadDashboard();
-  }).catch(function(e){if(e.status!==401)toast(e.message,'error')});
-}
-$('resetBtn').addEventListener('click',function(){
-  confirmBox('复位状态机','将状态恢复为「正常」，并取消该轮尚未投递的消息。确定继续？','复位',doReset);
-});
-$('resetBtn2').addEventListener('click',function(){
-  confirmBox('复位状态机','将状态恢复为「正常」，并取消该轮尚未投递的消息。确定继续？','复位',doReset);
-});
 
+/* ---------- 投递结果 ---------- */
+/* 状态 → [文案, 颜色变量]。cancelled = 本轮被签到或删除接收人取消。 */
+var DL_ST={
+  sent:['已送达','var(--green)'],
+  failed:['发送失败','var(--red)'],
+  pending:['重试中','var(--yellow)'],
+  cancelled:['已取消','var(--muted)']
+};
+function renderTriggerBanner(state,sum){
+  var el=$('bannerTrigTxt');
+  if(!el)return;
+  var s=sum||{},total=s.total||0;
+  if(state!=='triggered'){
+    el.innerHTML='<b>已触发</b>：处理完毕后点击上方「立即签到」即可恢复平安并重新计时。';
+    return;
+  }
+  if(!total){
+    el.innerHTML='<b>已触发</b>：本轮没有需要通知的接收人。';
+    return;
+  }
+  if(s.sent===total){
+    el.innerHTML='<b>已触发</b>：预设消息已送达全部 '+total+' 位接收人。处理完毕后点击上方「立即签到」即可恢复平安并重新计时。';
+    return;
+  }
+  if(s.sent===0){
+    el.innerHTML='<b>已触发</b>：<b>全部 '+total+' 位接收人都发送失败，消息可能无人收到！</b>'+
+      '请查看下方「最近投递」的失败原因，并尽快通过其他方式联系接收人。';
+    return;
+  }
+  el.innerHTML='<b>已触发</b>：'+total+' 位中 <b>'+(s.failed||0)+' 位发送失败</b>，其余 '+(s.sent||0)+
+    ' 位已送达。请查看下方「最近投递」的失败原因。';
+}
+function renderDeliveryList(list){
+  var box=$('deliveryList');
+  if(!box)return;
+  if(!list.length){
+    box.innerHTML='<div class="empty" style="padding:24px 16px">暂无投递记录<br>触发群发或发出警告后，这里会显示每一条消息的送达情况</div>';
+    return;
+  }
+  box.innerHTML=list.map(function(d){
+    var st=DL_ST[d.status]||['未知','var(--muted)'];
+    var name=d.recipientLabel||'已删除的接收人';
+    var when=d.sentAt||d.createdAt;
+    var t=when?new Date(when*1000).toLocaleString('zh-CN',{hour12:false}):'-';
+    var retry=(d.status!=='sent'&&d.attempts>1)?' · 已重试 '+d.attempts+' 次':'';
+    return '<div class="dl-row">'+
+        '<i class="dl-dot" style="background:'+st[1]+'"></i>'+
+        '<div class="dl-main">'+
+          '<div class="dl-title">'+esc(name)+
+            '<span class="dl-tag">'+esc(st[0])+'</span>'+
+            (d.channelType?'<span class="dl-tag">'+esc(d.channelType)+'</span>':'')+
+            '<span class="dl-tag">'+(d.purpose==='warning'?'警告':'群发')+'</span>'+
+          '</div>'+
+          '<div class="dl-meta">'+esc(t)+retry+'</div>'+
+          (d.lastError?'<div class="dl-err">'+esc(d.lastError)+'</div>':'')+
+        '</div>'+
+      '</div>';
+  }).join('');
+}
+function loadDeliveries(state){
+  return api('/api/deliveries?limit=30').then(function(d){
+    renderTriggerBanner(state,d.summary||{});
+    renderDeliveryList(d.deliveries||[]);
+  }).catch(function(e){
+    if(e.status!==401){
+      renderTriggerBanner(state,null);
+      if($('deliveryList'))$('deliveryList').innerHTML='<div class="empty" style="padding:24px 16px">投递记录加载失败：'+esc(e.message)+'</div>';
+    }
+  });
+}
+
+/* ---------- 系统巡检健康度 ---------- */
+/* 死人开关最怕的就是它自己悄悄坏了。这里把 cron 的巡检结果摆到明面上。 */
+function renderSysHealth(cfg){
+  var el=$('sysHealth');
+  if(!el)return;
+  var at=cfg.cronLastAt,status=cfg.cronLastStatus;
+  if(!at){
+    el.innerHTML='系统巡检：尚无记录（Cron 每 5 分钟执行一次，请稍候）';
+    return;
+  }
+  var mins=Math.floor((Date.now()/1000-at)/60);
+  var ago=mins<1?'刚刚':mins<60?mins+' 分钟前':Math.floor(mins/60)+' 小时前';
+  if(status==='error'){
+    el.innerHTML='<span style="color:var(--red)">⚠ 系统巡检失败</span>（上次成功前最后执行于 '+ago+'）'+
+      (cfg.cronLastError?'：'+esc(cfg.cronLastError):'')+
+      ' —— 状态机可能已停止推进，请检查 Cron 与 D1。';
+    return;
+  }
+  if(mins>15){
+    el.innerHTML='<span style="color:var(--red)">⚠ 已超过 '+mins+' 分钟没有巡检</span>（Cron 应每 5 分钟一次）。状态机可能已停止，请检查 Worker 是否正常。';
+    return;
+  }
+  el.innerHTML='系统巡检：'+ago+' 正常';
+}
 function doCheckin(){
   api('/api/checkin',{method:'POST'}).then(function(d){
     lastCheckinAt=Math.floor(d.checkedAt||Date.now()/1000);
@@ -1104,6 +1257,10 @@ $('btnLogin').addEventListener('click',doLogin);
 $('liUser').focus();
 renderRcptFields();
 syncRcptContentUI();
+renderPlaceholders('phWarn','rcptWarnContent','warning');
+renderPlaceholders('phTrig','rcptTrigContent','trigger');
+renderPlaceholders('phCmWarn','cmWarn','warning');
+renderPlaceholders('phCmTrig','cmTrig','trigger');
 if(token){
   api('/api/settings').then(showPage.bind(null,'dash')).catch(function(e){if(e.status!==401)showPage('dash')});
 }

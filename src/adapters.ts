@@ -9,6 +9,82 @@ export interface ChannelAdapter {
 const BLOCKED_HOST_SUFFIXES = [".localhost", ".local", ".internal"];
 const METADATA_HOSTS = ["169.254.169.254", "metadata.google.internal", "metadata.goog"];
 
+// Loopback, private, CGNAT and link-local ranges for a canonical dotted-quad.
+function isPrivateIpv4(host: string): boolean {
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return false;
+  const o = host.split(".").map(Number);
+  return (
+    o[0] === 0 ||                                     // 0.0.0.0/8
+    o[0] === 10 ||                                    // 10.0.0.0/8
+    o[0] === 127 ||                                   // 127.0.0.0/8
+    (o[0] === 172 && o[1]! >= 16 && o[1]! <= 31) ||   // 172.16.0.0/12
+    (o[0] === 192 && o[1] === 168) ||                 // 192.168.0.0/16
+    (o[0] === 169 && o[1] === 254) ||                 // 169.254.0.0/16
+    (o[0] === 100 && o[1]! >= 64 && o[1]! <= 127) ||  // 100.64.0.0/10 CGNAT
+    METADATA_HOSTS.includes(host)
+  );
+}
+
+// Expand an IPv6 literal into its eight 16-bit groups. Returns null when the
+// host is not a plain IPv6 address (hostname, zone id, malformed literal).
+function expandIpv6(host: string): number[] | null {
+  if (!host.includes(":") || !/^[0-9a-f:.]+$/i.test(host)) return null;
+  const halves = host.split("::");
+  if (halves.length > 2) return null;
+
+  const toGroups = (s: string): number[] | null => {
+    if (!s) return [];
+    const out: number[] = [];
+    for (const part of s.split(":")) {
+      // A trailing dotted-quad (::ffff:1.2.3.4) fills the last two groups.
+      if (part.includes(".")) {
+        const q = part.split(".").map(Number);
+        if (q.length !== 4 || q.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+        out.push((q[0]! << 8) | q[1]!, (q[2]! << 8) | q[3]!);
+        continue;
+      }
+      const n = parseInt(part, 16);
+      if (!Number.isInteger(n) || n < 0 || n > 0xffff) return null;
+      out.push(n);
+    }
+    return out;
+  };
+
+  const head = toGroups(halves[0] ?? "");
+  const tail = halves.length === 2 ? toGroups(halves[1] ?? "") : [];
+  if (head === null || tail === null) return null;
+
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const fill = 8 - head.length - tail.length;
+  if (fill < 0) return null;
+  return [...head, ...Array.from({ length: fill }, () => 0), ...tail];
+}
+
+function groupsToIpv4(g: number[]): string {
+  return [(g[6]! >> 8) & 255, g[6]! & 255, (g[7]! >> 8) & 255, g[7]! & 255].join(".");
+}
+
+// IPv6 has several ways to smuggle an IPv4 target inside the address —
+// ::ffff:127.0.0.1, ::127.0.0.1 and the NAT64 prefix 64:ff9b::/96 — all of
+// which bypass a naive prefix check. Unwrap them so the IPv4 rules apply, then
+// reject loopback, unspecified, ULA and link-local directly.
+function isPrivateIpv6(host: string): boolean {
+  // Strip a zone id (fe80::1%eth0) before parsing; link-local must not slip
+  // through just because the interface suffix confuses the matcher.
+  const g = expandIpv6(host.split("%")[0] ?? "");
+  if (!g) return false;
+
+  if (g.every((x) => x === 0)) return true;                                        // ::
+  if (g[0] === 0x64 && g[1] === 0xff9b) return isPrivateIpv4(groupsToIpv4(g));     // NAT64
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 &&
+      (g[5] === 0 || g[5] === 0xffff)) {
+    return isPrivateIpv4(groupsToIpv4(g));   // ::x.y.z.w / ::ffff:x.y.z.w (covers ::1)
+  }
+  if ((g[0]! & 0xfe00) === 0xfc00) return true;                                    // fc00::/7 ULA
+  if ((g[0]! & 0xffc0) === 0xfe80) return true;                                    // fe80::/10 link-local
+  return false;
+}
+
 // Resolve non-dotted IPv4 literals (decimal "2130706433", hex "0x7f000001",
 // padded/octal dotted forms like "0177.0.0.1") to canonical dotted-quad so the
 // private-range check below cannot be bypassed with exotic encodings.
@@ -57,22 +133,16 @@ export function safeUrl(raw: string): URL {
   if (host === "localhost" || BLOCKED_HOST_SUFFIXES.some((s) => host.endsWith(s))) {
     throw new Error("Internal hosts are not allowed");
   }
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
-    const o = host.split(".").map(Number);
-    const privateRange =
-      o[0] === 0 ||
-      o[0] === 10 ||
-      o[0] === 127 ||
-      (o[0] === 172 && o[1]! >= 16 && o[1]! <= 31) ||
-      (o[0] === 192 && o[1] === 168) ||
-      (o[0] === 169 && o[1] === 254) ||
-      (o[0] === 100 && o[1]! >= 64 && o[1]! <= 127);
-    if (privateRange || METADATA_HOSTS.includes(host)) throw new Error("Private addresses are not allowed");
-  }
-  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) {
+  if (isPrivateIpv4(host) || isPrivateIpv6(host)) {
     throw new Error("Private addresses are not allowed");
   }
   return url;
+}
+
+// Re-checked at send time as well as on write: the database is a second write
+// path, and a stale or imported row must not turn into an SSRF.
+function assertSafeUrl(raw: string): void {
+  safeUrl(raw);
 }
 
 async function httpSend(url: string, init: RequestInit): Promise<Response> {
@@ -146,6 +216,25 @@ function nl2br(s: string): string {
   return s.replace(/\r?\n/g, "<br />");
 }
 
+// Telegram's HTML parse_mode understands only a handful of tags; a bare "<" or
+// "&" anywhere in the text makes the whole call fail with HTTP 400. Allowed
+// tags are stashed verbatim (attributes and all) and everything else is
+// escaped as plain text.
+const TG_ALLOWED_TAGS = /<\/?(?:b|i|u|s|a|code|pre|tg-spoiler)(?:\s[^<>]*)?>/gi;
+
+function escapeTelegramHtml(s: string): string {
+  const kept: string[] = [];
+  const stashed = s.replace(TG_ALLOWED_TAGS, (m) => {
+    kept.push(m);
+    return `\u0000${kept.length - 1}\u0000`;
+  });
+  return stashed
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\u0000(\d+)\u0000/g, (_, i: string) => kept[Number(i)] ?? "");
+}
+
 function emailHtml(msg: Message): string {
   return `<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
     <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0">
@@ -194,7 +283,9 @@ export const adapters: Record<ChannelType, ChannelAdapter> = {
       return { chatId: cfg.chatId.trim(), botToken: cfg.botToken.trim() };
     },
     send: async (_env, config, msg) => {
-      const text = msg.title ? `<b>${escapeHtml(msg.title)}</b>\n${msg.body}` : msg.body;
+      const text = msg.title
+        ? `<b>${escapeTelegramHtml(msg.title)}</b>\n${escapeTelegramHtml(msg.body)}`
+        : escapeTelegramHtml(msg.body);
       const resp = await httpSend(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -213,6 +304,7 @@ export const adapters: Record<ChannelType, ChannelAdapter> = {
       return { key: cfg.key.trim(), server: safeUrl(server).toString().replace(/\/$/, "") };
     },
     send: async (_env, config, msg) => {
+      assertSafeUrl(config.server);
       const params = new URLSearchParams();
       params.set("title", msg.title || "Alert");
       params.set("body", msg.body);
@@ -233,6 +325,7 @@ export const adapters: Record<ChannelType, ChannelAdapter> = {
       return { server: safeUrl(server).toString().replace(/\/$/, ""), topic: cfg.topic };
     },
     send: async (_env, config, msg) => {
+      assertSafeUrl(config.server);
       const resp = await httpSend(config.server, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -415,6 +508,7 @@ export const adapters: Record<ChannelType, ChannelAdapter> = {
         imageUrl: msg.imageUrl ?? null,
         time: new Date().toISOString(),
       };
+      assertSafeUrl(config.url);
       const resp = await httpSend(config.url, {
         method: config.method,
         headers: merged,

@@ -6,3 +6,7 @@ dist/
 scripts/owner.sql
 credentials.txt
 seed.sql
+# D1 导出含 owner 表的 TOTP 密钥，切勿提交
+d1-backup-*.sql
+# 工具数据目录（内含上述备份与内部报告），不进版本库
+.workbuddy/

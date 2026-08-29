@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 import { adapters, sendToChannel } from "./adapters";
+import { buildMessage, buildVars, DEFAULT_TRIGGER_TITLE, DEFAULT_WARNING_TITLE } from "./messages";
+import { rateLimit, clientIp } from "./ratelimit";
+import { issueCheckinToken } from "./token";
+import { formatFullInTz } from "./time";
 import { VALID_CHANNELS, type ChannelType, type Message } from "./types";
 import type { AuthEnv } from "./guard";
 
@@ -9,18 +13,50 @@ import type { AuthEnv } from "./guard";
 // First line of each content acts as the message title.
 const MAX_CONTENT_LEN = 10000;
 
-interface SplitMsg {
-  title?: string;
-  body: string;
+// 测试消息里的签到链接：够验证链接能点通，又不至于留一条长期有效的
+// 签到入口在别人的收件箱里。
+const TEST_LINK_TTL_SEC = 3600;
+
+/* Channel credentials are write-only: the admin UI only needs to recognise a
+ * channel, never read its secrets back. Masking happens server-side — doing it
+ * in the browser would be pointless, since the plaintext has already arrived. */
+const SECRET_CONFIG_KEYS = new Set(["botToken", "sendKey", "key"]);
+const SECRET_HEADER_KEYS = /(authorization|auth|token|secret|key|signature|bearer|password|cookie)/i;
+
+function maskValue(v: string): string {
+  return v.length <= 4 ? "••••" : v.slice(0, 3) + "••••" + v.slice(-2);
 }
 
-// First line = title, remainder = body. A single-line text is used as both.
-export function splitMessage(content: string): SplitMsg {
-  const idx = content.indexOf("\n");
-  if (idx === -1) return { body: content };
-  const first = content.slice(0, idx).trim();
-  const rest = content.slice(idx + 1).trim();
-  return first ? { title: first, body: rest || first } : { body: rest };
+// Returns a masked copy of the stored config JSON. Topic / server / url / email
+// / chatId stay readable — the admin has to recognise and re-enter them anyway.
+export function maskConfigJson(raw: string): string {
+  let cfg: unknown;
+  try {
+    cfg = JSON.parse(raw);
+  } catch {
+    return "{}";
+  }
+  if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) return "{}";
+  const out = cfg as Record<string, unknown>;
+
+  for (const k of Object.keys(out)) {
+    if (SECRET_CONFIG_KEYS.has(k) && typeof out[k] === "string") {
+      out[k] = maskValue(out[k] as string);
+    }
+  }
+  // Webhook stores extra headers as a JSON string; mask credential-looking ones.
+  if (typeof out.headers === "string") {
+    try {
+      const h = JSON.parse(out.headers) as Record<string, unknown>;
+      for (const k of Object.keys(h)) {
+        if (SECRET_HEADER_KEYS.test(k) && typeof h[k] === "string") h[k] = maskValue(h[k] as string);
+      }
+      out.headers = JSON.stringify(h);
+    } catch {
+      /* keep the stored string as-is */
+    }
+  }
+  return JSON.stringify(out);
 }
 
 const recipients = new Hono<AuthEnv>();
@@ -48,8 +84,21 @@ recipients.get("/", async (c) => {
     `SELECT id, label, channel_type, config_json, on_warning, on_trigger,
             warning_content, trigger_content, created_at
      FROM recipients ORDER BY created_at DESC`
-  ).all();
-  return c.json({ recipients: results });
+  ).all<{
+    id: number;
+    label: string;
+    channel_type: ChannelType;
+    config_json: string;
+    on_warning: number;
+    on_trigger: number;
+    warning_content: string;
+    trigger_content: string;
+    created_at: number;
+  }>();
+
+  // Never ship bot tokens / send keys / webhook auth headers to the browser.
+  const masked = results.map((r) => ({ ...r, config_json: maskConfigJson(r.config_json) }));
+  return c.json({ recipients: masked });
 });
 
 // POST /api/recipients — add a recipient (content required per checked event)
@@ -176,7 +225,10 @@ recipients.delete("/:id", async (c) => {
   if (!Number.isInteger(id)) return c.json({ error: "Invalid id" }, 400);
 
   // Also cancel any undelivered messages queued for this recipient.
-  await c.env.DB.prepare("DELETE FROM deliveries WHERE recipient_id = ? AND status != 'sent'").bind(id).run();
+  // 同样是取消而非删除：接收人删掉后，他此前失败过的投递记录仍应可回溯。
+  await c.env.DB.prepare(
+    "UPDATE deliveries SET status = 'cancelled' WHERE recipient_id = ? AND status = 'pending'"
+  ).bind(id).run();
   const result = await c.env.DB.prepare("DELETE FROM recipients WHERE id = ?").bind(id).run();
   if ((result.meta.changes ?? 0) === 0) return c.json({ error: "Not found" }, 404);
   return c.json({ message: "Recipient removed" });
@@ -186,6 +238,13 @@ recipients.delete("/:id", async (c) => {
 // through their channel (one message per subscribed event, prefixed [测试]).
 recipients.post("/:id/test", async (c) => {
   const id = parseInt(c.req.param("id"), 10);
+  if (!Number.isInteger(id)) return c.json({ error: "Invalid id" }, 400);
+
+  // Every test push spends real channel quota (Server酱 allows 5/day), so cap
+  // it per client rather than per recipient.
+  const allowed = await rateLimit(c.env, `rtest:${clientIp(c.req.raw.headers)}`, 20, 3600);
+  if (!allowed) return c.json({ error: "测试发送过于频繁，请稍后再试" }, 429);
+
   const row = await c.env.DB.prepare(
     `SELECT label, channel_type, config_json, on_warning, on_trigger,
             warning_content, trigger_content
@@ -203,22 +262,60 @@ recipients.post("/:id/test", async (c) => {
     }>();
   if (!row) return c.json({ error: "Not found" }, 404);
 
-  const tzOffset = -new Date().getTimezoneOffset() / 60;
-  const sampleTime = `2026-01-01 12:00（UTC${tzOffset >= 0 ? "+" : ""}${tzOffset} 示例）`;
+  // 测试消息走的是和真实告警完全相同的变量表，唯一的差别是值：时间用示例
+  // 值，签到链接则发一条真实可用的短时效令牌 —— 只有点得通，才算验证了链路。
+  const owner = await c.env.DB.prepare(
+    "SELECT timezone, expiry_hours, warning_hours, last_checkin_at FROM owner WHERE id = 1"
+  ).first<{
+    timezone: string;
+    expiry_hours: number;
+    warning_hours: number;
+    last_checkin_at: number | null;
+  }>();
+
+  const now = Math.floor(Date.now() / 1000);
+  const tz = owner?.timezone || "UTC";
+  const site = (c.env.APP_BASE_URL || "").replace(/\/+$/, "");
+  const stamp = (t: number) => `${formatFullInTz(t, tz)}（${tz}）`;
+  const sample = `示例值（${stamp(now)}）`;
+
+  const base = {
+    tz,
+    site,
+    lastCheckin: owner?.last_checkin_at ? stamp(owner.last_checkin_at) : "尚无记录",
+    hours:
+      owner?.last_checkin_at != null
+        ? String(Math.round((Math.max(0, now - owner.last_checkin_at) / 3600) * 10) / 10)
+        : "",
+    expiryHours: owner?.expiry_hours,
+    warningHours: owner?.warning_hours,
+    label: row.label,
+  };
+
   const messages: Message[] = [];
+  // 一次测试只生成一条链接，警告与触发两条消息共用 —— 与正式链路保持一致，
+  // 免得测试里各发一条、跟线上行为对不上。
+  const testUrl =
+    (await issueCheckinToken(c.env, {
+      purpose: "test",
+      ttlSec: TEST_LINK_TTL_SEC,
+      cycle: now,
+    })) ?? "";
   if (row.on_warning && row.warning_content.trim()) {
-    const m = splitMessage(row.warning_content);
-    messages.push({
-      title: "[测试] " + (m.title ?? ""),
-      body: m.body.replace(/\{deadline\}/g, sampleTime),
-    });
+    const m = buildMessage(
+      row.warning_content,
+      { title: DEFAULT_WARNING_TITLE, body: "" },
+      buildVars({ purpose: "warning", ...base, checkinUrl: testUrl, deadline: sample })
+    );
+    messages.push({ title: "[测试] " + (m.title ?? DEFAULT_WARNING_TITLE), body: m.body });
   }
   if (row.on_trigger && row.trigger_content.trim()) {
-    const m = splitMessage(row.trigger_content);
-    messages.push({
-      title: "[测试] " + (m.title ?? ""),
-      body: m.body.replace(/\{time\}/g, sampleTime),
-    });
+    const m = buildMessage(
+      row.trigger_content,
+      { title: DEFAULT_TRIGGER_TITLE, body: "" },
+      buildVars({ purpose: "trigger", ...base, checkinUrl: testUrl, time: sample })
+    );
+    messages.push({ title: "[测试] " + (m.title ?? DEFAULT_TRIGGER_TITLE), body: m.body });
   }
   if (messages.length === 0) {
     return c.json({ error: "该接收人没有可发送的内容：请先勾选事件并填写对应内容" }, 400);
