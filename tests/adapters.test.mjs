@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { safeUrl } from "../.test-build/adapters.js";
+import { safeUrl, adapters } from "../.test-build/adapters.js";
 
 // SSRF 黑名单回归用例 —— 含历史审查中发现的全部绕过手法（IPv4 编码变体、
 // IPv4-mapped IPv6、NAT64、zone id）。任何一条被放行即是回归。
@@ -70,4 +70,22 @@ test("safeUrl preserves URL parts for use", () => {
   const u = safeUrl("https://hooks.example.com/dms?a=1");
   assert.equal(u.pathname, "/dms");
   assert.equal(u.search, "?a=1");
+});
+
+test("webhook validateConfig accepts string and object headers (send-time re-validation)", () => {
+  // 首次写入：UI 传对象
+  const once = adapters.webhook.validateConfig({
+    url: "https://hooks.example.com/x",
+    headers: { Authorization: "Bearer t" },
+  });
+  assert.equal(typeof once.headers, "string");
+  assert.deepEqual(JSON.parse(once.headers), { Authorization: "Bearer t" });
+  // 发送时用存储形态（headers 已是 JSON 字符串）再校验 —— 修复前这里必然抛错
+  const twice = adapters.webhook.validateConfig(once);
+  assert.deepEqual(JSON.parse(twice.headers), { Authorization: "Bearer t" });
+  // 无 headers 时存 "{}"，同样可二次通过
+  const bare = adapters.webhook.validateConfig({ url: "https://hooks.example.com/x" });
+  assert.equal(bare.headers, "{}");
+  assert.equal(adapters.webhook.validateConfig(bare).headers, "{}");
+  assert.throws(() => adapters.webhook.validateConfig({ url: "https://hooks.example.com/x", headers: "{broken" }));
 });

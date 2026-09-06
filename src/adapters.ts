@@ -480,10 +480,34 @@ export const adapters: Record<ChannelType, ChannelAdapter> = {
       const method = typeof cfg.method === "string" && ["POST", "PUT"].includes(cfg.method.toUpperCase())
         ? cfg.method.toUpperCase()
         : "POST";
+      // headers 同时接受对象（UI 首次写入）与 JSON 字符串（库里的存储形态）。
+      // 发送时会用存储形态再走一遍本函数 —— 只认对象的话，webhook 通道
+      // 第一次真正的发送就会因为 headers 已被字符串化而必然失败。
       let headers = "{}";
       if (cfg.headers != null) {
-        if (typeof cfg.headers !== "object") throw new Error("Webhook headers must be a JSON object");
-        headers = JSON.stringify(Object.fromEntries(Object.entries(cfg.headers as object).map(([k, v]) => [k, String(v)])));
+        let parsed: unknown;
+        if (typeof cfg.headers === "string") {
+          const trimmed = cfg.headers.trim();
+          if (trimmed) {
+            try {
+              parsed = JSON.parse(trimmed);
+            } catch {
+              throw new Error("Webhook headers must be valid JSON");
+            }
+          }
+        } else if (typeof cfg.headers === "object") {
+          parsed = cfg.headers;
+        } else {
+          throw new Error("Webhook headers must be a JSON object");
+        }
+        if (parsed != null) {
+          if (typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Webhook headers must be a JSON object");
+          }
+          headers = JSON.stringify(
+            Object.fromEntries(Object.entries(parsed as object).map(([k, v]) => [k, String(v)]))
+          );
+        }
       }
       return { url: safeUrl(cfg.url).toString(), method, headers };
     },

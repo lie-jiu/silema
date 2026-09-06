@@ -67,6 +67,8 @@ async function scheduled() {
 
 console.log("== 1. 公开接口 ==");
 {
+  // 幂等：把状态机复位到 normal，避免上一轮中途失败留下的 warning/triggered 干扰断言
+  db("UPDATE owner SET state='normal', last_checkin_at=strftime('%s','now'), warning_sent_at=NULL, triggered_at=NULL WHERE id=1");
   const { status, body } = await api("/api/status");
   check("GET /api/status 200", status === 200 && body?.state === "normal");
   const do404 = await fetch(`${BASE}/c/${"a".repeat(43)}/do`, { method: "POST" });
@@ -91,6 +93,8 @@ console.log("== 2. 安全响应头 ==");
 console.log("== 3. 登录 ==");
 let token;
 {
+  // 幂等：清掉上一轮运行留下的登录限流窗口（15 分钟内重跑否则全被 429）
+  db("DELETE FROM rate_limits WHERE key LIKE 'login:%'");
   const bad = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: "admin", password: "wrong", totpCode: "000000" }) });
   check("错误凭据 → 401", bad.status === 401);
   const ok = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: "admin", password: "e2e-pass-123", totpCode: await totpNow() }) });
@@ -123,6 +127,8 @@ console.log("== 4. 受保护接口 ==");
 
 console.log("== 5. 签到 ==");
 {
+  // 拨到 10 小时前：已过冷却（9h）但未超时（18h），保证「首次签到」可成功
+  db("UPDATE owner SET state='normal', last_checkin_at=strftime('%s','now')-10*3600, warning_sent_at=NULL, triggered_at=NULL WHERE id=1");
   const first = await api("/api/checkin", { method: "POST" }, token);
   check("首次签到 200", first.status === 200);
   const second = await api("/api/checkin", { method: "POST" }, token);
@@ -180,6 +186,8 @@ console.log("== 8. 登录限流 ==");
 
 console.log("== 9. 状态机：警告与触发（本地 scheduled handler，通道故意不可达）==");
 {
+  // 幂等：清掉上一轮 e2e 留下的同名接收人，保证本节断言的投递行数正确
+  db("DELETE FROM recipients WHERE label='e2e-webhook'");
   const rcpt = await api("/api/recipients", { method: "POST", body: JSON.stringify({
     label: "e2e-webhook", channelType: "webhook",
     config: { url: "https://e2e-nonexistent.invalid/hook", method: "POST" },

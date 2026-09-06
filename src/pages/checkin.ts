@@ -30,23 +30,31 @@ function shell(title: string, body: string): string {
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b5bd6'/%3E%3Ctext x='16' y='22.5' font-family='sans-serif' font-size='15' font-weight='700' fill='%23fff' text-anchor='middle'%3E%E6%AD%BB%3C/text%3E%3C/svg%3E">
 <style>
   :root{
-    --bg:#f6f7fb; --surface:#ffffff; --surface-2:#f1f3f9;
-    --border:#e4e8f1; --text:#101828; --text-2:#475467; --muted:#98a2b3;
-    --primary:#5b5bd6;
+    --bg:#eef1f8; --surface:#ffffff; --surface-2:#f2f4fa; --surface-3:#e9edf6;
+    --border:#e2e7f2; --border-strong:#d2dae8;
+    --text:#101828; --text-2:#475467; --muted:#98a2b3;
+    --primary:#5b5bd6; --primary-deep:#3e3eae;
     --green:#12a150; --green-soft:rgba(18,161,80,.12);
     --yellow:#d97706; --yellow-soft:rgba(217,119,6,.14);
-    --red:#e5484d;   --red-soft:rgba(229,72,77,.13);
-    --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 32px rgba(16,24,40,.08);
+    --red:#e5484d; --red-soft:rgba(229,72,77,.13);
+    --inset-hi:rgba(255,255,255,.85);
+    --card-shadow:0 30px 60px -22px rgba(16,24,40,.28),0 6px 16px rgba(16,24,40,.07),inset 0 2px 0 var(--inset-hi),inset 0 -3px 8px rgba(16,24,40,.05);
+    --disc:inset 0 3px 8px rgba(16,24,40,.10),inset 0 -2px 5px rgba(255,255,255,.6),0 5px 12px -4px rgba(16,24,40,.15);
+    --key:0 2px 0 var(--border-strong),0 3px 6px rgba(16,24,40,.08),inset 0 1px 0 var(--inset-hi);
   }
   @media (prefers-color-scheme: dark){
     :root{
-      --bg:#0b0e14; --surface:#12161f; --surface-2:#181d29;
-      --border:#232a38; --text:#f0f2f7; --text-2:#aab2c2; --muted:#69738a;
-      --primary:#7b7bf0;
+      --bg:#0b0e14; --surface:#141925; --surface-2:#1a2030; --surface-3:#222939;
+      --border:#252d3e; --border-strong:#333d52;
+      --text:#f0f2f7; --text-2:#aab2c2; --muted:#69738a;
+      --primary:#7b7bf0; --primary-deep:#4343b5;
       --green:#34c98a; --green-soft:rgba(52,201,138,.15);
       --yellow:#f5a623; --yellow-soft:rgba(245,166,35,.16);
-      --red:#f2666b;   --red-soft:rgba(242,102,107,.16);
-      --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 40px rgba(0,0,0,.45);
+      --red:#f2666b; --red-soft:rgba(242,102,107,.16);
+      --inset-hi:rgba(255,255,255,.06);
+      --card-shadow:0 30px 70px -22px rgba(0,0,0,.7),0 6px 18px rgba(0,0,0,.45),inset 0 2px 0 var(--inset-hi),inset 0 -3px 8px rgba(0,0,0,.4);
+      --disc:inset 0 3px 8px rgba(0,0,0,.45),inset 0 -2px 5px rgba(255,255,255,.05),0 5px 12px -4px rgba(0,0,0,.4);
+      --key:0 2px 0 rgba(0,0,0,.55),0 3px 8px rgba(0,0,0,.35),inset 0 1px 0 var(--inset-hi);
     }
   }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -59,12 +67,14 @@ function shell(title: string, body: string): string {
   .wrap{width:100%;max-width:420px;text-align:center}
   .brand{display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:22px;
     font-size:15px;font-weight:650;color:var(--text-2);letter-spacing:.2px}
-  .brand .dot{width:26px;height:26px;border-radius:8px;background:var(--primary);color:#fff;
-    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;
-    padding:34px 26px 28px;box-shadow:var(--shadow)}
+  .brand .dot{width:26px;height:26px;border-radius:9px;
+    background:linear-gradient(160deg,#8a8af2,var(--primary) 55%,var(--primary-hover));color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+    box-shadow:0 3px 0 var(--primary-deep),0 8px 14px -6px rgba(91,91,214,.6),inset 0 2px 0 rgba(255,255,255,.35)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:22px;
+    padding:34px 26px 28px;box-shadow:var(--card-shadow)}
   .icon{width:60px;height:60px;border-radius:50%;margin:0 auto 18px;display:flex;
-    align-items:center;justify-content:center}
+    align-items:center;justify-content:center;box-shadow:var(--disc)}
   .icon svg{width:30px;height:30px}
   .icon.ok{background:var(--green-soft);color:var(--green)}
   .icon.wait{background:var(--yellow-soft);color:var(--yellow)}
@@ -73,16 +83,18 @@ function shell(title: string, body: string): string {
   h1{font-size:19px;font-weight:650;letter-spacing:-.2px;margin-bottom:9px}
   p{font-size:14px;line-height:1.65;color:var(--text-2)}
   .meta{margin-top:14px;font-size:12.5px;color:var(--muted)}
-  .spinner{width:28px;height:28px;border-radius:50%;border:2.5px solid var(--surface-2);
+  .spinner{width:28px;height:28px;border-radius:50%;border:2.5px solid var(--surface-3);
     border-top-color:var(--primary);animation:spin .7s linear infinite;margin:0 auto}
   @keyframes spin{to{transform:rotate(360deg)}}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
-    margin-top:20px;padding:11px 22px;border-radius:11px;font-size:14px;font-weight:550;
-    text-decoration:none;border:1px solid transparent;cursor:pointer;
-    background:var(--primary);color:#fff;transition:filter .15s,transform .1s}
+    margin-top:20px;padding:11px 22px;border:1px solid transparent;border-radius:13px;font-size:14px;font-weight:550;
+    text-decoration:none;cursor:pointer;
+    background:linear-gradient(180deg,#7676ea,var(--primary) 45%,var(--primary-hover,#4c4cc4));color:#fff;
+    box-shadow:0 3px 0 var(--primary-deep),0 12px 20px -8px rgba(91,91,214,.65),inset 0 1px 0 rgba(255,255,255,.35);
+    transition:transform .12s ease,box-shadow .16s ease,filter .16s ease}
   .btn:hover{filter:brightness(1.07)}
-  .btn:active{transform:translateY(1px)}
-  .btn.ghost{background:transparent;border-color:var(--border);color:var(--text-2)}
+  .btn:active{transform:translateY(3px);box-shadow:0 3px 8px -5px rgba(16,24,40,.4),inset 0 1px 0 rgba(255,255,255,.25)}
+  .btn.ghost{background:transparent;border-color:var(--border);color:var(--text-2);box-shadow:var(--key)}
   .hidden{display:none}
 </style>
 </head>
