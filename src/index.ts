@@ -5,7 +5,7 @@ import checkinRoutes, { checkinCooldownSec, performCheckin } from "./checkin";
 import recipientsRoutes from "./recipients";
 import { runCron, readCronHealth } from "./health";
 import { requireAuth, type AuthEnv } from "./guard";
-import { isValidTimeZone } from "./time";
+import { isValidTimeZone, formatFullInTz } from "./time";
 import { publicPage } from "./pages/public";
 import { adminPage } from "./pages/admin";
 import { validateCheckinToken, consumeCheckinToken } from "./token";
@@ -27,6 +27,27 @@ const app = new Hono<AuthEnv>();
 app.onError((err, c) => {
   console.error("Worker error:", err);
   return c.json({ error: "Internal Server Error" }, 500);
+});
+
+// Security headers on every response. Pages are same-origin only (inline
+// scripts/styles need 'unsafe-inline'), tokens never appear in URLs beyond the
+// one-time check-in link, so a conservative CSP is safe to apply globally.
+app.use("*", async (c, next) => {
+  await next();
+  c.header("Content-Security-Policy", [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join("; "));
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "no-referrer");
+  c.header("X-Frame-Options", "DENY");
 });
 
 /* ---------------- Public ---------------- */
@@ -96,7 +117,9 @@ app.get("/c/:token", async (c) => {
   return c.html(checkinPendingPage(token));
 });
 
-// 同时接受 GET（兜底按钮，无脚本环境）与 POST（页面脚本）。
+// 仅接受 POST（页面脚本 fetch，或无脚本环境的 <form method="post"> 按钮）。
+// 刻意不提供 GET：邮件网关的链接扫描会抓取落地页里出现的一切 URL，GET 若能
+// 签到，机器人就会替所有者续命 —— 连兜底路径都不给爬虫留入口。
 async function doCheckin(c: Context<AuthEnv>): Promise<Response> {
   const token = c.req.param("token") ?? "";
   if (!isSafeToken(token)) {
@@ -139,11 +162,15 @@ async function doCheckin(c: Context<AuthEnv>): Promise<Response> {
   }
 
   if (res.ok) {
+    // 展示时间按所有者时区格式化 —— 与消息模板里的 {time} 口径一致。
+    const tzRow = await c.env.DB.prepare("SELECT timezone FROM owner WHERE id = 1")
+      .first<{ timezone: string }>();
+    const tz = tzRow?.timezone && isValidTimeZone(tzRow.timezone) ? tzRow.timezone : "UTC";
     return c.html(checkinResultPage({
       ok: true,
       title: "已确认平安",
       message: "签到成功，警报已解除。",
-      meta: `本次签到时间：${new Date(res.checkedAt * 1000).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`,
+      meta: `本次签到时间：${formatFullInTz(res.checkedAt, tz)}（${tz}）`,
     }));
   }
   // 冷却期里点链接不算错误 —— 状态本来就是平安的，只是不用再签一次。
@@ -159,7 +186,6 @@ async function doCheckin(c: Context<AuthEnv>): Promise<Response> {
   return c.html(checkinResultPage({ ok: false, title: "签到未完成", message: res.error }), 500);
 };
 
-app.get("/c/:token/do", doCheckin);
 app.post("/c/:token/do", doCheckin);
 
 // Manual cron trigger, guarded by a shared secret

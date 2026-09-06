@@ -275,7 +275,10 @@ recipients.post("/:id/test", async (c) => {
 
   const now = Math.floor(Date.now() / 1000);
   const tz = owner?.timezone || "UTC";
-  const site = (c.env.APP_BASE_URL || "").replace(/\/+$/, "");
+  // 站点地址：APP_BASE_URL 优先，未配置时用请求 Origin 兜底（Cron 发送没有
+  // 请求上下文做不到这一点，测试发送可以 —— 保证测试里的签到链接可点）。
+  const site =
+    (c.env.APP_BASE_URL || "").replace(/\/+$/, "") || new URL(c.req.url).origin;
   const stamp = (t: number) => `${formatFullInTz(t, tz)}（${tz}）`;
   const sample = `示例值（${stamp(now)}）`;
 
@@ -300,6 +303,7 @@ recipients.post("/:id/test", async (c) => {
       purpose: "test",
       ttlSec: TEST_LINK_TTL_SEC,
       cycle: now,
+      base: site,
     })) ?? "";
   if (row.on_warning && row.warning_content.trim()) {
     const m = buildMessage(

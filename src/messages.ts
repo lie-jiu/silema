@@ -14,7 +14,8 @@ export interface SplitMsg {
   body: string;
 }
 
-// First line = title, remainder = body. A single-line text is used as both.
+// First line = title, remainder = body. Content with no newline carries no
+// title — buildMessage then falls back to the built-in default title.
 export function splitMessage(content: string): SplitMsg {
   const idx = content.indexOf("\n");
   if (idx === -1) return { body: content };
@@ -86,12 +87,12 @@ export interface MessageContext {
  * 生成替换用的完整变量表。所有消息类型共用这一份构造，避免出现
  * 「警告消息支持 {checkin_url}、触发消息却忘了」这类漏配。
  *
- * {checkin_url} 拿不到时回退成站点地址：消息里至少要有一个能点进去
- * 手动签到的链接，留空会让人以为系统坏了。
+ * {checkin_url} 拿不到时回退成站点地址；连站点地址也没有（APP_BASE_URL
+ * 未配置且调用方无请求上下文）时整个键省略 —— 占位符原样留在消息里，
+ * 让「配置缺失」肉眼可见，而不是悄无声息地发一条没有入口的求救消息。
  */
 export function buildVars(ctx: MessageContext): Record<string, string> {
-  return {
-    checkin_url: ctx.checkinUrl || ctx.site,
+  const vars: Record<string, string> = {
     time: ctx.time ?? "",
     deadline: ctx.deadline ?? "",
     last_checkin: ctx.lastCheckin ?? "",
@@ -101,6 +102,8 @@ export function buildVars(ctx: MessageContext): Record<string, string> {
     expiry_hours: ctx.expiryHours != null ? String(ctx.expiryHours) : "",
     warning_hours: ctx.warningHours != null ? String(ctx.warningHours) : "",
   };
+  if (ctx.checkinUrl || ctx.site) vars.checkin_url = ctx.checkinUrl || ctx.site;
+  return vars;
 }
 
 // Assemble one recipient's outbound message from their stored content, falling

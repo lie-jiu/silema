@@ -67,16 +67,15 @@ async function ping(url: string): Promise<void> {
   await fetch(url, { method: "GET", signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS) });
 }
 
-// 只在状态翻转时 ping，其余时候保持安静。
-//   成功且此前正常 → 不 ping：Healthchecks.io 这类服务靠「超时未收到」判断故障，
-//                     每 5 分钟一次的成功 ping 纯属噪音。
-//   成功且刚从故障恢复 → ping，告知已恢复。
-//   失败首次 / 之后每 12 次 → ping 失败端点。
-async function pingHeartbeat(env: Bindings, ok: boolean, prevStreak: number, streak: number): Promise<void> {
+// 每次成功的巡检都 ping 成功端点。Healthchecks.io / Uptime Kuma 这类
+// 「死人开关式」监控恰恰靠「超时未收到 ping」判断存活 —— 常规心跳不是噪音，
+// 而是外部服务赖以判断的唯一信号；只在翻转时 ping 会让外部服务永久误报。
+// 失败侧仍节流：首次失败及之后每 12 次 ping 一次失败端点，避免告警风暴。
+async function pingHeartbeat(env: Bindings, ok: boolean, streak: number): Promise<void> {
   if (!env.HEARTBEAT_URL && !env.HEARTBEAT_FAIL_URL) return;
 
   if (ok) {
-    if (prevStreak > 0 && env.HEARTBEAT_URL) await ping(env.HEARTBEAT_URL);
+    if (env.HEARTBEAT_URL) await ping(env.HEARTBEAT_URL);
     return;
   }
   if (streak !== 1 && streak % FAIL_REMINDER_EVERY !== 0) return;
@@ -107,13 +106,8 @@ export async function runCron(env: Bindings): Promise<void> {
     console.error("[cron] run failed:", err);
   }
 
-  let prevStreak = 0;
   let streak = 0;
   try {
-    const prev = await env.DB.prepare("SELECT value FROM system_state WHERE key = ?")
-      .bind(K_FAIL_STREAK).first<{ value: string }>();
-    prevStreak = Number(prev?.value ?? 0) || 0;
-
     const statements: D1PreparedStatement[] = [
       upsertStmt(env, K_LAST_AT, String(Math.floor(Date.now() / 1000))),
       upsertStmt(env, K_LAST_STATUS, ok ? "ok" : "error"),
@@ -131,7 +125,7 @@ export async function runCron(env: Bindings): Promise<void> {
   }
 
   try {
-    await pingHeartbeat(env, ok, prevStreak, streak);
+    await pingHeartbeat(env, ok, streak);
   } catch (err) {
     console.error("[cron] heartbeat failed:", err);
   }

@@ -27,12 +27,20 @@ function randomToken(): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** 生成一条签到链接用的令牌，返回已拼好的完整 URL；未配置 APP_BASE_URL 时返回 null。 */
+/** 对外链接的基底：APP_BASE_URL 优先；测试发送这类有请求上下文的调用方可用
+ * 请求 Origin 兜底。Cron 没有请求上下文，APP_BASE_URL 未配置时只能返回空。 */
+function baseUrl(env: Bindings, fallback?: string): string {
+  const base = (env.APP_BASE_URL || "").replace(/\/+$/, "");
+  if (base) return base;
+  return (fallback || "").replace(/\/+$/, "");
+}
+
+/** 生成一条签到链接用的令牌，返回已拼好的完整 URL；无法确定站点地址时返回 null。 */
 export async function issueCheckinToken(
   env: Bindings,
-  opts: { purpose: TokenPurpose; ttlSec: number; cycle?: number | null }
+  opts: { purpose: TokenPurpose; ttlSec: number; cycle?: number | null; base?: string }
 ): Promise<string | null> {
-  const base = (env.APP_BASE_URL || "").replace(/\/+$/, "");
+  const base = baseUrl(env, opts.base);
   if (!base) return null;
 
   const token = randomToken();
@@ -59,9 +67,9 @@ export async function issueCheckinToken(
  */
 export async function getOrIssueSharedToken(
   env: Bindings,
-  opts: { purpose: TokenPurpose; cycle: number; ttlSec: number }
+  opts: { purpose: TokenPurpose; cycle: number; ttlSec: number; base?: string }
 ): Promise<string | null> {
-  const base = (env.APP_BASE_URL || "").replace(/\/+$/, "");
+  const base = baseUrl(env, opts.base);
   if (!base) return null;
 
   const now = Math.floor(Date.now() / 1000);
@@ -79,6 +87,7 @@ export async function getOrIssueSharedToken(
     purpose: opts.purpose,
     cycle: opts.cycle,
     ttlSec: opts.ttlSec,
+    base: opts.base,
   });
 }
 
@@ -114,14 +123,17 @@ export async function consumeCheckinToken(env: Bindings, token: string): Promise
   if (!row || row.used_at != null) return null;
 
   const now = Math.floor(Date.now() / 1000);
-  // WHERE used_at IS NULL 保证并发时只有一个请求能消费成功（其余拿到 null）。
-  await env.DB.prepare(
+  // WHERE used_at IS NULL 保证并发时只有一个请求真正消费成功 —— 但 UPDATE
+  // 影响行数为 0（另一并发请求抢先）时必须返回 null，否则两个请求都会拿着
+  // 各自查询到的快照继续往下走，签到链接就消费了两次。
+  const res = await env.DB.prepare(
     `UPDATE checkin_tokens
         SET used_at = ?, use_count = use_count + 1
       WHERE token = ? AND used_at IS NULL`
   )
     .bind(now, token)
     .run();
+  if ((res.meta.changes ?? 0) === 0) return null;
 
   return row;
 }

@@ -10,3 +10,8 @@ seed.sql
 d1-backup-*.sql
 # 工具数据目录（内含上述备份与内部报告），不进版本库
 .workbuddy/
+
+# 测试构建产物
+.test-build/
+.e2e-totp.env
+.devlog

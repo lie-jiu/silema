@@ -33,7 +33,7 @@
 - **可观测性（死人开关的自监控）**：
   - **投递审计**：每一条消息的送达结果（成功 / 失败 / 重试次数 / 失败原因）都落库并在后台「最近投递」可见；签到时用**取消**而非删除，失败原因不会被抹掉
   - **警告也纳入审计**：警告发送失败同样留痕——它是所有者避免触发的最后机会，静默失败会导致无人察觉地直接触发群发
-  - **Cron 心跳**：每次巡检记录成败，超过 15 分钟未巡检会在后台告警；可选配置外部监控（Healthchecks.io / Uptime Kuma），**仅在状态翻转时 ping**，不会产生 5 分钟一次的告警风暴
+  - **Cron 心跳**：每次巡检记录成败，超过 15 分钟未巡检会在后台告警；可选配置外部监控（Healthchecks.io / Uptime Kuma），**每次巡检成功都 ping**（外部监控靠「超时未收到」判断存活，这正是它需要的常规信号），失败时按节流 ping 失败端点
   - **横幅如实汇报**：「已触发」横幅按真实投递结果显示，全部失败时会明确告知「消息可能无人收到」，而非固定声称已发送
 - **安全模型**：
   - 登录 = 用户名 + 密码 + TOTP，凭据来自 CF 机密变量（`ADMIN_USERNAME` / `ADMIN_PASSWORD`），不落库；JWT 有效期 **12 小时**
@@ -41,7 +41,7 @@
   - 所有业务接口仅验证 Bearer Token，无额外验证头
    - 限流：登录 10 次/15 分钟（D1 固定窗口，单语句原子计数）
    - SSRF 防护：自建服务地址强制 HTTPS + 私网/云元数据黑名单 + 禁重定向；IPv4 侧归一化十进制/十六进制/八进制/inet_aton 变体，IPv6 侧解包 `::ffff:` 映射地址与 NAT64 前缀并覆盖 ULA / 链路本地 / 未指定地址；**写入时与发送时各校验一次**
-   - 凭据比较先做 SHA-256 再常量时间比较（不泄露长度）；管理页输出全量转义防 XSS
+   - 凭据比较先做 SHA-256 再常量时间比较（不泄露长度）；管理页输出全量转义防 XSS；所有响应附带安全响应头（CSP / nosniff / Referrer-Policy / frame-ancestors 'none'）
    - 通道凭据（bot token / SendKey / Webhook 鉴权头）在**服务端**脱敏后才下发，浏览器端永远拿不到明文
    - 已知取舍：TOTP 未记录已消耗的时间片，同一验证码在 ±30 秒容差窗口内可重复使用（单管理员场景风险可接受；如需严格防重放可自行恢复 `last_totp_counter` 字段）
 
@@ -63,6 +63,11 @@
 
 ```bash
 npm install
+
+# 0. 编辑 wrangler.toml：
+#    - routes 里的自定义域名是作者的（slm.liejiu.top），没有自己的域名就整段
+#      删除或注释，否则 deploy 会失败；同时同步删除/修改 [vars] 的 APP_BASE_URL
+#    - database_id 换成下一步创建的 id
 
 # 1. 创建资源（如已有可跳过，并把 id 填入 wrangler.toml）
 npx wrangler d1 create d1-db
@@ -99,7 +104,16 @@ npx wrangler d1 execute d1-db --local --file seed.sql
 npx wrangler dev                                # http://localhost:8787
 ```
 
-本地触发 Cron：`curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`
+本地触发 Cron：`curl "http://127.0.0.1:8787/cdn-cgi/handler/scheduled"`（`/cdn-cgi/local/scheduled` 亦可）
+
+## 测试
+
+```bash
+npm test                 # 单元测试：SSRF 绕过用例、TOTP RFC 6238 向量、DST 边界、消息模板等
+node scripts/e2e.mjs     # 端到端（需先按上面步骤启动 wrangler dev 并完成本地种子）
+```
+
+端到端覆盖：登录/TOTP/单会话吊销、保护接口鉴权、签到与冷却、SSRF 黑名单、快速签到链接一次性消费、登录限流、完整状态机（超时→警告→触发→签到恢复）。
 
 ## 配置
 
@@ -113,14 +127,14 @@ npx wrangler dev                                # http://localhost:8787
 | `MAIL_FROM` | — | 发件人地址（CF 原生邮件模式必需；Resend 模式可选） |
 | `RESEND_API_KEY` | — | 启用 Resend 邮件后端（优先于 CF 原生） |
 | `CRON_SECRET` | — | 启用手动触发：`POST /__cron`（请求头 `X-Cron-Secret`） |
-| `HEARTBEAT_URL` | — | 外部存活监控端点，从故障恢复时 ping（如 `https://hc-ping.com/<uuid>`） |
+| `HEARTBEAT_URL` | — | 外部存活监控端点，每次巡检成功时 ping（如 `https://hc-ping.com/<uuid>`） |
 | `HEARTBEAT_FAIL_URL` | — | 巡检失败时 ping；**留空则回退到 `HEARTBEAT_URL` + `/fail`** |
 
 ### Vars（wrangler.toml `[vars]`）
 
 | 名称 | 说明 |
 |---|---|
-| `APP_BASE_URL` | 自定义域名时填写；留空自动取请求 Origin（邮件/退订链接的基底） |
+| `APP_BASE_URL` | 对外链接的基底，**部署后请显式配置**。`{checkin_url}` 依赖它 —— Cron 发消息时没有请求上下文，无法从请求推导；测试发送会以请求 Origin 兜底 |
 
 ### 外部存活监控（可选，但强烈建议）
 
@@ -140,12 +154,11 @@ npx wrangler secret put HEARTBEAT_URL      # https://hc-ping.com/<uuid>
 npx wrangler secret put HEARTBEAT_FAIL_URL # https://kuma.example/api/push/xxx?status=down
 ```
 
-ping 时机刻意做了节流，**只在状态翻转时发**，避免每 5 分钟一次的告警风暴：
+ping 时机刻意区分了成功与失败两条路径：
 
 | 情况 | 行为 |
 |---|---|
-| 巡检成功，且此前一直正常 | **不 ping** —— 外部服务靠「超时未收到」判断存活，持续 ping 只是噪音 |
-| 巡检成功，且刚从故障恢复 | ping 成功端点 |
+| 巡检成功 | **ping 成功端点**（每次都发——外部服务靠「超时未收到」判断存活，这个常规信号正是它需要的） |
 | 巡检失败，首次 | ping 失败端点 |
 | 巡检失败，之后每隔 12 次（约每小时） | ping 失败端点 |
 | 失败次数的中间态 | 不 ping |
@@ -176,7 +189,7 @@ ping 时机刻意做了节流，**只在状态翻转时发**，避免每 5 分�
 | `{expiry_hours}` | 签到时限（小时） | |
 | `{warning_hours}` | 警告窗口（小时） | |
 
-未知占位符会**原样保留**而不是被清空——拼错的时候能一眼看出来。
+未知占位符会**原样保留**而不是被清空——拼错的时候能一眼看出来。若 `APP_BASE_URL` 未配置，Cron 发出的消息里 `{checkin_url}` 也会原样保留（而不是变成空链接），便于第一时间发现配置缺失。
 
 ## 快速签到链接
 
@@ -189,7 +202,7 @@ ping 时机刻意做了节流，**只在状态翻转时发**，避免每 5 分�
 
 > **为什么不是点开链接的那一次 GET 直接签到？**
 > 邮件里的链接会被机器抓：企业邮件网关的链接扫描、IMAP 客户端预取、微信 / Slack 的链接预览都会自动 GET 一遍。若 GET 本身就算签到，机器人会替所有者续命，**死人开关直接失去意义**。
-> 所以 `GET /c/<token>` 只返回一个页面，页面加载时由脚本完成签到；不执行脚本的扫描器抓了也不会签到。对真人而言仍然是点开即完成，一步不多。脚本被禁用时页面会给出一个手动按钮兜底。
+> 所以 `GET /c/<token>` 只返回一个页面，页面加载时由脚本完成签到；不执行脚本的扫描器抓了也不会签到。对真人而言仍然是点开即完成，一步不多。脚本被禁用时页面会给出一个手动按钮兜底 —— 兜底走的是 **POST 表单**（`<noscript>` 内的 `<form method="post">`），整条链路不存在能改变状态的 GET，链接扫描器把落地页抓个遍也无从触发签到。
 
 **关于「警告结束」里的签到链接**：放进去意味着**收到消息的人可以代你签到**——误报时联系人能帮你解除，但也等于把「撤销警报」的权力交了出去。请只对可信联系人使用。内置默认文案因此在「警告结束」里**不含**该变量，需要的话自己加。
 
@@ -366,7 +379,7 @@ App Store 安装 [Bark](https://apps.apple.com/app/bark-customed-notifications/i
 | POST | `/api/auth/login` | `{username, password, totpCode}` → `{token}`，凭据对照 CF 机密变量，签发同时吊销旧会话 |
 | POST | `/api/checkin` | 签到：恢复 normal、取消未投递的排队消息、重新计时并写入日历。**冷却期为签到时限的一半（上限 12h），且仅在 normal 状态生效**——warning / triggered 下随时可签到；冷却中返回 429 + `nextCheckinAt` |
 | GET | `/api/checkin/list?y=&m=` | 月度签到列表（按所有者时区） |
-| GET/PUT | `/api/settings` | 时区 / 签到时限 / 警告期 / 上次签到时间 |
+| GET/PUT | `/api/settings` | 时区 / 签到时限 / 警告期（上次签到时间只能通过签到更新，无独立设置入口） |
 | GET/POST | `/api/recipients` · PUT/DELETE `/api/recipients/:id` | 通知接收人管理（label / channelType / config / onWarning / onTrigger / warningContent / triggerContent，勾选的事件内容必填） |
 | POST | `/api/recipients/:id/test` | 按该接收人已配置的真实内容发送测试；删除时自动取消其排队消息 |
 | GET | `/api/deliveries?limit=50` | 投递审计日志（最近优先）+ 最新一轮群发的成败统计 `summary` |
@@ -391,12 +404,14 @@ src/
 ├── totp.ts         # RFC 6238 TOTP（WebCrypto 实现）
 ├── time.ts         # IANA 时区工具
 └── pages/          # 内联前端页面（admin / public / checkin）
-migrations/         # D1 schema 迁移（0001-0012；0001-0004 含已被后续迁移取代的历史
+migrations/         # D1 schema 迁移（0001-0013；0001-0004 含已被后续迁移取代的历史
                     #  表，按序执行即可。messages 表自 0008 起不再被读取，仅为存量用户
                     #  保留。0010 新增 system_state 与 deliveries.purpose，0011 把幂等
                     #  唯一索引扩为 (recipient_id, cycle, purpose)，0012 新增
-                    #  checkin_tokens 表）
+                    #  checkin_tokens 表，0013 把签到令牌改为按事件（cycle）共用一条）
 scripts/init-owner.cjs  # 所有者 TOTP 与种子 SQL 生成器
+scripts/test.mjs    # 单元测试（node:test + esbuild，npm test）
+scripts/e2e.mjs     # 本地端到端验证（需 wrangler dev 运行中，node scripts/e2e.mjs）
 ```
 
 ## 安全须知

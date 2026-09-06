@@ -42,10 +42,9 @@ async function generateCode(secret: string, counter: number): Promise<string> {
 }
 
 
-async function matchCode(secret: string, token: string): Promise<number | null> {
+async function matchCode(secret: string, token: string, nowMs: number): Promise<number | null> {
   if (!token || token.length !== 6 || !/^\d{6}$/.test(token)) return null;
-  const now = Math.floor(Date.now() / 1000);
-  const counter = Math.floor(now / 30);
+  const counter = Math.floor(nowMs / 1000 / 30);
   for (const delta of [-1, 0, 1]) {
     const slice = counter + delta;
     const expected = await generateCode(secret, slice);
@@ -54,7 +53,8 @@ async function matchCode(secret: string, token: string): Promise<number | null> 
   return null;
 }
 
-export async function verifyTOTP(secret: string, token: string): Promise<boolean> {
-  return (await matchCode(secret, token)) !== null;
+// now 可注入以便测试（RFC 6238 向量），生产路径用默认值即可。
+export async function verifyTOTP(secret: string, token: string, now: number = Date.now()): Promise<boolean> {
+  return (await matchCode(secret, token, now)) !== null;
 }
 

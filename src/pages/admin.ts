@@ -1007,18 +1007,21 @@ document.querySelectorAll('.js-checkin').forEach(function(b){b.addEventListener(
 
 /* ---------- calendar ---------- */
 function loadCalendar(){
-  var now=new Date();
-  if(!calYear){calYear=now.getFullYear();calMonth=now.getMonth()+1}
-  $('calTitle').textContent=calYear+' 年 '+calMonth+' 月';
+  /* 首次打开不带 y/m：由服务端按所有者时区返回「当前月」，避免访问者
+   * 浏览器时区与所有者时区在月边界错位一天。 */
+  var q=calYear?('?y='+calYear+'&m='+calMonth):'';
+  $('calTitle').textContent='加载中…';
   $('calGrid').innerHTML='';
-  api('/api/checkin/list?y='+calYear+'&m='+calMonth).then(function(data){
+  api('/api/checkin/list'+q).then(function(data){
+    if(!calYear){calYear=data.year;calMonth=data.month}
+    $('calTitle').textContent=data.year+' 年 '+data.month+' 月';
     var dows=['日','一','二','三','四','五','六'];
     var html=dows.map(function(d){return '<div class="cal-dow">'+d+'</div>'}).join('');
-    var first=new Date(calYear,calMonth-1,1).getDay();
+    var first=new Date(Date.UTC(data.year,data.month-1,1)).getUTCDay();
     for(var i=0;i<first;i++)html+='<div></div>';
-    var today=new Date();
+    var today=data.today||{};
     data.days.forEach(function(day){
-      var isToday=calYear===today.getFullYear()&&calMonth===today.getMonth()+1&&day.d===today.getDate();
+      var isToday=calYear===data.year&&calMonth===data.month&&today.d===day.d;
       html+='<div class="cal-day'+(day.t?' checked':'')+(isToday?' today':'')+'"'+(day.t?' title="'+esc(day.t)+' 已签到"':'')+'>'+day.d+(day.t?'<span class="t">'+esc(day.t)+'</span>':'')+'</div>';
     });
     $('calGrid').innerHTML=html;

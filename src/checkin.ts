@@ -120,7 +120,11 @@ checkin.get("/list", async (c) => {
     days.push({ d, t: byDay.get(d) ?? null });
   }
 
-  return c.json({ year, month, timezone: tz, days });
+  // 「今天」按所有者时区返回，前端不再用浏览器本地时区自行判断 ——
+  // 否则跨时区查看时高亮和月份初值都会错位一天。
+  const today = ymdInTz(Math.floor(Date.now() / 1000), tz);
+
+  return c.json({ year, month, timezone: tz, today, days });
 });
 
 export default checkin;

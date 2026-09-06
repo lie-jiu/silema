@@ -62,12 +62,17 @@ export async function handleCron(env: Bindings): Promise<void> {
 
   // Housekeeping once per hour rather than on every 5-minute tick — the
   // rate limiter already cleans up opportunistically on 5% of requests.
+  // 警告投递是「入队后同一调用内立即定稿」的：若 Worker 在两步之间被杀，
+  // 该行会永远停在 pending —— processDeliveries 只处理 trigger，常规清理又
+  // 跳过 pending。警告有时效性，超过 7 天的残留 pending 行只剩占空间的价值。
   if (now % 3600 < 300) {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?")
         .bind(now - RATE_LIMIT_RETENTION_SEC),
       env.DB.prepare("DELETE FROM deliveries WHERE status != 'pending' AND created_at < ?")
         .bind(now - DELIVERY_RETENTION_SEC),
+      env.DB.prepare("DELETE FROM deliveries WHERE status = 'pending' AND purpose = 'warning' AND created_at < ?")
+        .bind(now - 7 * 86400),
     ]);
     await purgeExpiredTokens(env, now);
   }
@@ -169,6 +174,21 @@ async function processDeliveries(env: Bindings, owner: OwnerStateRow): Promise<v
   );
   const claimed = due.filter((_, i) => ((claims[i] as D1Result).meta.changes ?? 0) > 0);
   if (claimed.length === 0) return;
+
+  // 竞态兜底：状态翻转与入队之间不是原子的，所有者的签到事务若恰好落在
+  // 两步之间，会先于入队执行「取消 pending」而扑空。发送前重读一次状态，
+  // 已不是 triggered（签到已恢复平安）就取消本批，而不是把过期警报发出去。
+  const cur = await env.DB.prepare("SELECT state FROM owner WHERE id = 1")
+    .first<{ state: string }>();
+  if (cur?.state !== "triggered") {
+    await env.DB.batch(
+      claimed.map((delivery) =>
+        env.DB.prepare("UPDATE deliveries SET status = 'cancelled' WHERE id = ? AND status = 'pending'")
+          .bind(delivery.id)
+      )
+    );
+    return;
+  }
 
   const sentAt = formatFullInTz(now, tz) + `（${tz}）`;
 

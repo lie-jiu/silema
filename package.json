@@ -9,7 +9,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:init": "wrangler d1 migrations apply d1-db",
-    "db:init:remote": "wrangler d1 migrations apply d1-db --remote"
+    "db:init:remote": "wrangler d1 migrations apply d1-db --remote",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "hono": "^4.7.0",

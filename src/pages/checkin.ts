@@ -5,9 +5,10 @@
  * IMAP 客户端预取、微信/Slack 的链接预览，全都会自动 GET 一遍。若 GET 本身
  * 就算签到，机器人会替所有者续命，死人开关直接失去意义。
  *
- * 真正的状态变更放在 /c/<token>/do，只有页面里的脚本或用户点击兜底按钮
- * 才会发起 —— 不执行脚本的扫描器抓到页面也不会签到。对真人而言仍然是
- * 点开链接即完成，一步不多。
+ * 真正的状态变更放在 /c/<token>/do，而且只有 POST 一条路（页面脚本 fetch，
+ * 或无脚本环境里的 <form method="post"> 按钮）—— 连兜底都不提供 GET，链接
+ * 扫描器就算把落地页里的表单地址也抓去 GET 一遍，同样不会签到。对真人而言
+ * 仍然是点开链接即完成，一步不多。
  */
 
 // 令牌只允许 base64url 字符。既是输入校验，也让下面的 HTML 拼接没有
@@ -111,8 +112,8 @@ export function checkinPendingPage(token: string): string {
      <h1>正在签到…</h1>
      <p>请稍候，正在为你确认平安。</p>
      <noscript>
-       <a class="btn" href="/c/${t}/do">点此完成签到</a>
-       <p class="meta">当前浏览器未启用脚本，需要手动点击一次。</p>
+       <form method="post" action="/c/${t}/do"><button class="btn" type="submit">点此完成签到</button></form>
+       <p class="meta">当前浏览器未启用脚本，点击按钮完成签到。</p>
      </noscript>
      <script>
      (function(){
