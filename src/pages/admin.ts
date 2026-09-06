@@ -331,6 +331,20 @@ export function adminPage(): string {
   .legend .l-ok{background:var(--green-soft);outline:1px solid var(--green)}
   .legend .l-today{background:var(--surface-2);outline:2px solid var(--primary);outline-offset:-2px}
 
+  /* ============ 签到时间趋势（折线图） ============ */
+  .cal-trend-card{margin-top:14px}
+  .cal-trend-hint{margin:-6px 0 12px}
+  .chart-wrap{position:relative}
+  .chart-wrap svg{display:block;max-width:100%}
+  .chart-empty{text-align:center;color:var(--muted);font-size:13px;padding:40px 0}
+  .chart-tip{
+    position:absolute;z-index:2;pointer-events:none;white-space:nowrap;display:none;
+    background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;
+    padding:5px 11px;font-size:12px;font-weight:700;color:var(--text);
+    box-shadow:var(--shadow-card);font-variant-numeric:tabular-nums;
+    transform:translate(-50%,-100%);
+  }
+
   /* ============ templates ============ */
   .tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
   .tpl{
@@ -603,6 +617,14 @@ export function adminPage(): string {
             <span><i class="l-today"></i>今天</span>
             <span id="calTz"></span>
           </div>
+        </div>
+        <div class="card cal-trend-card">
+          <h3>
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            签到时间趋势
+          </h3>
+          <p class="hint cal-trend-hint">每日首次签到时间的走势，折线断开表示当天未签到。</p>
+          <div class="chart-wrap" id="trendWrap"><div class="chart-empty">加载中…</div></div>
         </div>
       </section>
 
@@ -1052,6 +1074,7 @@ function loadCalendar(){
   var q=calYear?('?y='+calYear+'&m='+calMonth):'';
   $('calTitle').textContent='加载中…';
   $('calGrid').innerHTML='';
+  $('trendWrap').innerHTML='<div class="chart-empty">加载中…</div>';
   api('/api/checkin/list'+q).then(function(data){
     if(!calYear){calYear=data.year;calMonth=data.month}
     $('calTitle').textContent=data.year+' 年 '+data.month+' 月';
@@ -1066,6 +1089,7 @@ function loadCalendar(){
     });
     $('calGrid').innerHTML=html;
     if(data.timezone)$('calTz').textContent='时区：'+data.timezone;
+    chartData=data;renderTrend();
   }).catch(function(e){if(e.status!==401)toast('日历加载失败：'+e.message,'error')});
 }
 $('calPrev').addEventListener('click',function(){
@@ -1074,6 +1098,102 @@ $('calPrev').addEventListener('click',function(){
 $('calNext').addEventListener('click',function(){
   calMonth++;if(calMonth>12){calMonth=1;calYear++}loadCalendar();
 });
+
+/* ---------- 签到时间趋势（纯 SVG 折线图，无外部依赖） ---------- */
+/* 与日历共用同一份 /api/checkin/list 响应：切月时两者必然一致，
+ * 也不必为图表单独再发一次请求。 */
+var chartData=null;
+function trendMinutes(t){
+  var p=String(t).split(':');
+  return parseInt(p[0],10)*60+parseInt(p[1],10);
+}
+function renderTrend(){
+  var wrap=$('trendWrap');
+  if(!wrap||!chartData)return;
+  var W=wrap.clientWidth;
+  if(!W)return; /* 页面处于隐藏状态量不到宽度；showPage('cal') 会重新触发 */
+  var H=240,mL=48,mR=14,mT=16,mB=28;
+  var iw=W-mL-mR,ih=H-mT-mB,N=chartData.days.length||1;
+  var px=function(d){return mL+(d-1)/(N-1)*iw};
+  var py=function(m){return mT+(1-m/1440)*ih};
+  var pts=[];
+  chartData.days.forEach(function(day){
+    if(day.t)pts.push({d:day.d,min:trendMinutes(day.t),t:day.t});
+  });
+  if(!pts.length){wrap.innerHTML='<div class="chart-empty">本月还没有签到记录</div>';return}
+
+  var s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="每日首次签到时间折线图">';
+  s+='<defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">'+
+     '<stop offset="0" stop-color="var(--green)" stop-opacity=".16"/>'+
+     '<stop offset="1" stop-color="var(--green)" stop-opacity="0"/></linearGradient></defs>';
+  /* 纵轴：00:00 → 24:00，每 6 小时一条网格线 */
+  for(var h=0;h<=24;h+=6){
+    var gy=py(h*60).toFixed(1),lbl=(h<10?'0'+h:h)+':00';
+    s+='<line x1="'+mL+'" y1="'+gy+'" x2="'+(W-mR)+'" y2="'+gy+'" stroke="var(--border)" stroke-width="'+(h===0?1.5:1)+'"/>';
+    s+='<text x="'+(mL-9)+'" y="'+(parseFloat(gy)+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">'+lbl+'</text>';
+  }
+  /* 横轴日期刻度：窄屏抽稀到每 10 天 */
+  var step=W<420?10:5;
+  for(var d=1;d<=N;d++){
+    if(d!==1&&d!==N&&d%step!==0)continue;
+    s+='<text x="'+px(d).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">'+d+'</text>';
+  }
+  /* 按日期连续性分段：断一天就断线，诚实反映漏签 */
+  var runs=[],cur=[];
+  for(var i=0;i<pts.length;i++){
+    if(cur.length&&pts[i].d!==cur[cur.length-1].d+1){runs.push(cur);cur=[]}
+    cur.push(pts[i]);
+  }
+  if(cur.length)runs.push(cur);
+  runs.forEach(function(run){
+    var line='';
+    run.forEach(function(p,idx){line+=(idx?' L':'M')+px(p.d).toFixed(1)+' '+py(p.min).toFixed(1)});
+    if(run.length>1){
+      s+='<path d="'+line+' L'+px(run[run.length-1].d).toFixed(1)+' '+py(0).toFixed(1)+' L'+px(run[0].d).toFixed(1)+' '+py(0).toFixed(1)+' Z" fill="url(#trendGrad)"/>';
+      s+='<path d="'+line+'" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    run.forEach(function(p){
+      s+='<circle cx="'+px(p.d).toFixed(1)+'" cy="'+py(p.min).toFixed(1)+'" r="3.5" fill="var(--green)" stroke="var(--surface)" stroke-width="1.5"><title>'+esc(chartData.month)+'月'+p.d+'日 '+esc(p.t)+'</title></circle>';
+    });
+  });
+  s+='<circle id="trendHl" r="6.5" fill="none" stroke="var(--green)" stroke-width="2" opacity="0"/>';
+  s+='<rect id="trendHit" x="'+mL+'" y="'+mT+'" width="'+iw+'" height="'+ih+'" fill="none" pointer-events="all" style="cursor:crosshair"/>';
+  s+='</svg><div class="chart-tip" id="trendTip"></div>';
+  wrap.innerHTML=s;
+
+  var svg=wrap.querySelector('svg'),tip=$('trendTip'),hl=$('trendHl'),hit=$('trendHit');
+  function tipShow(ev){
+    var rect=svg.getBoundingClientRect();
+    var mx=ev.clientX-rect.left,best=null,bd=Infinity;
+    pts.forEach(function(p){var dx=Math.abs(px(p.d)-mx);if(dx<bd){bd=dx;best=p}});
+    if(!best)return;
+    var X=px(best.d),Y=py(best.min);
+    hl.setAttribute('cx',X);hl.setAttribute('cy',Y);hl.setAttribute('opacity','1');
+    tip.textContent=chartData.month+' 月 '+best.d+' 日 · '+best.t;
+    tip.style.display='block';
+    tip.style.left=Math.min(Math.max(X,70),W-70)+'px';
+    tip.style.top=(Y-12)+'px';
+  }
+  function tipHide(){tip.style.display='none';hl.setAttribute('opacity','0')}
+  hit.addEventListener('pointermove',tipShow);
+  hit.addEventListener('pointerdown',tipShow);
+  hit.addEventListener('pointerleave',tipHide);
+}
+/* 容器尺寸变化（窗口缩放、旋屏）都按新宽度重画。
+ * 用 ResizeObserver 而非 window.resize：视口切换时 size 变化一定触发，
+ * 页面隐藏期间量到宽度 0 会静默跳过，不会留下被 max-width 压扁的旧图。 */
+var trendRz;
+if(window.ResizeObserver){
+  new ResizeObserver(function(){
+    if(!chartData)return;
+    clearTimeout(trendRz);trendRz=setTimeout(renderTrend,150);
+  }).observe($('trendWrap'));
+}else{
+  window.addEventListener('resize',function(){
+    if(!chartData)return;
+    clearTimeout(trendRz);trendRz=setTimeout(renderTrend,150);
+  });
+}
 
 /* ---------- notification recipients ---------- */
 var CH_CN={email:'邮件',telegram:'Telegram',bark:'Bark',ntfy:'ntfy',serverchan:'Server酱·Turbo',serverchan3:'Server酱³',webhook:'Webhook'};
