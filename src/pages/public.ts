@@ -87,8 +87,8 @@
   .level-dark{background:#10141c;border-color:#232b3b;color:#f0f2f7}
   .level-dark{box-shadow:0 30px 70px -22px rgba(0,0,0,.8),0 6px 18px rgba(0,0,0,.5),inset 0 2px 0 rgba(255,255,255,.06),inset 0 -3px 8px rgba(0,0,0,.45)}
 
-  .dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-bottom:20px;animation:pulse 2.2s ease-in-out infinite}
-  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.75}}
+  .dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-bottom:20px;animation:pulse 4s ease-in-out infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:1}10%{transform:scale(1.3);opacity:.75}20%{transform:scale(1);opacity:1}100%{transform:scale(1);opacity:1}}
   h1{font-size:14px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:26px}
   .level-dark h1{color:#8a93a8}
 
@@ -141,7 +141,7 @@
     .hours{font-size:54px}
   }
   @media (prefers-reduced-motion:reduce){
-    *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
   }
 </style>
 </head>

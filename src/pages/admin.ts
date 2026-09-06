@@ -458,7 +458,7 @@ export function adminPage(): string {
     .rcpt-sw{width:100%;padding-left:50px}
   }
   @media (prefers-reduced-motion:reduce){
-    *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
   }
   .ph-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
   .ph-label{font-size:11.5px;color:var(--muted);margin-right:2px;flex-shrink:0}
