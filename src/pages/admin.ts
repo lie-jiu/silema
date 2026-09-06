@@ -400,6 +400,9 @@ export function adminPage(): string {
   .dl-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;
     background:linear-gradient(180deg,var(--surface-2),var(--surface-3));color:var(--text-2);
     box-shadow:0 1px 0 var(--border-strong),inset 0 1px 0 var(--inset-hi)}
+  /* 翻页条沿用日历 .cal-head 的视觉，只是把间距从「下留白」换成「上留白」 */
+  .dl-pager{margin:16px 0 0}
+  .dl-pager span{min-width:64px}
   .rcpt-cfg{
     display:block;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted);
     word-break:break-all;margin-top:3px;
@@ -994,14 +997,17 @@ function renderTriggerBanner(state,sum){
   el.innerHTML='<b>已触发</b>：'+total+' 位中 <b>'+(s.failed||0)+' 位发送失败</b>，其余 '+(s.sent||0)+
     ' 位已送达。请查看下方「最近投递」的失败原因。';
 }
-function renderDeliveryList(list){
+/* 每页条数与翻页状态。dlState 记住最近一次的 owner 状态，翻页刷新列表时
+ * 横幅文案不丢。 */
+var DL_PAGE_SIZE=10,dlPage=1,dlState='normal';
+function renderDeliveryList(list,meta){
   var box=$('deliveryList');
   if(!box)return;
   if(!list.length){
     box.innerHTML='<div class="empty" style="padding:24px 16px">暂无投递记录<br>触发群发或发出警告后，这里会显示每一条消息的送达情况</div>';
     return;
   }
-  box.innerHTML=list.map(function(d){
+  var rows=list.map(function(d){
     var st=DL_ST[d.status]||['未知','var(--muted)'];
     var name=d.recipientLabel||'已删除的接收人';
     var when=d.sentAt||d.createdAt;
@@ -1020,14 +1026,37 @@ function renderDeliveryList(list){
         '</div>'+
       '</div>';
   }).join('');
+  /* 翻页条与日历同款：chevron 按钮 + 页码。服务端已把页码夹进有效区间，
+   * 两端按钮各自置灰即可。只有一页时不渲染。 */
+  var total=meta?meta.total||0:0;
+  var pages=Math.max(1,Math.ceil(total/DL_PAGE_SIZE));
+  if(meta&&meta.page)dlPage=meta.page;
+  var pager='';
+  if(total>DL_PAGE_SIZE){
+    pager='<div class="cal-head dl-pager">'+
+        '<button class="btn btn-outline btn-sm" id="dlPrev" type="button" aria-label="上一页"'+(dlPage<=1?' disabled':'')+'>'+
+          '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>'+
+        '</button>'+
+        '<span>'+dlPage+' / '+pages+'</span>'+
+        '<button class="btn btn-outline btn-sm" id="dlNext" type="button" aria-label="下一页"'+(dlPage>=pages?' disabled':'')+'>'+
+          '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>'+
+        '</button>'+
+      '</div>';
+  }
+  box.innerHTML=rows+pager;
+  if(pager){
+    $('dlPrev').addEventListener('click',function(){if(dlPage>1){dlPage--;loadDeliveries()}});
+    $('dlNext').addEventListener('click',function(){if(dlPage<pages){dlPage++;loadDeliveries()}});
+  }
 }
 function loadDeliveries(state){
-  return api('/api/deliveries?limit=30').then(function(d){
-    renderTriggerBanner(state,d.summary||{});
-    renderDeliveryList(d.deliveries||[]);
+  if(state!==undefined)dlState=state;
+  return api('/api/deliveries?limit='+DL_PAGE_SIZE+'&page='+dlPage).then(function(d){
+    renderTriggerBanner(dlState,d.summary||{});
+    renderDeliveryList(d.deliveries||[],d);
   }).catch(function(e){
     if(e.status!==401){
-      renderTriggerBanner(state,null);
+      renderTriggerBanner(dlState,null);
       if($('deliveryList'))$('deliveryList').innerHTML='<div class="empty" style="padding:24px 16px">投递记录加载失败：'+esc(e.message)+'</div>';
     }
   });

@@ -250,10 +250,18 @@ app.put("/api/settings", async (c) => {
   return c.json({ message: "Settings saved" });
 });
 
-// GET /api/deliveries?limit=50 — 投递审计日志（最近优先）
+// GET /api/deliveries?limit=50&page=1 — 投递审计日志（最近优先，分页）
 app.get("/api/deliveries", async (c) => {
-  const parsed = parseInt(c.req.query("limit") || "50", 10);
-  const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 200) : 50;
+  const parsedLimit = parseInt(c.req.query("limit") || "50", 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50;
+  const parsedPage = parseInt(c.req.query("page") || "1", 10);
+
+  // 先取总数把 page 夹进有效区间：行被 90 天清理后，前端停留的旧页码
+  // 会自动收敛到最后一页，而不是渲染出一个空列表。
+  const total =
+    (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM deliveries").first<{ n: number }>())?.n ?? 0;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Number.isFinite(parsedPage) ? Math.min(Math.max(parsedPage, 1), pages) : 1;
 
   // LEFT JOIN：recipient_id 没有外键约束，接收人被删后历史仍要能查出来。
   const { results } = await c.env.DB.prepare(
@@ -263,8 +271,8 @@ app.get("/api/deliveries", async (c) => {
      FROM deliveries d
      LEFT JOIN recipients r ON d.recipient_id = r.id
      ORDER BY d.created_at DESC, d.id DESC
-     LIMIT ?`
-  ).bind(limit).all<{
+     LIMIT ? OFFSET ?`
+  ).bind(limit, (page - 1) * limit).all<{
     id: number;
     cycle: number;
     purpose: string;
@@ -315,6 +323,9 @@ app.get("/api/deliveries", async (c) => {
       sentAt: r.sent_at,
     })),
     summary,
+    total,
+    page,
+    limit,
   });
 });
 
