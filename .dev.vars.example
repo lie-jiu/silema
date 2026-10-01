@@ -1,0 +1,23 @@
+# 本地与生产都不入库的凭据。生产用 `wrangler secret put <NAME>`。
+# 本地预览：`npm run db:seed` 会自动生成一份 .dev.vars。
+
+# 登录凭据不入库（docs/backend.md §5）。三者任一缺失 → 需登录接口一律 503。
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=
+ADMIN_PASSWORD_HASH=
+SESSION_SECRET=
+CRON_SECRET=
+
+# 邮件通道（Resend HTTP API，docs/backend.md §5）。生产用 `wrangler secret put EMAIL_API_KEY`。
+# 两者任一缺失 → email 通道发送即失败并记 cron error，其余通道不受影响。
+# EMAIL_FROM 必须是已在 Resend 验证过的域名下的地址，例如 silema@mail.liejiu.top
+EMAIL_API_KEY=
+EMAIL_FROM=
+
+# 外部心跳（Healthchecks.io 式），按 job 拆成两个 check（docs/backend.md §7）
+HEARTBEAT_URL=
+
+# 本地预览专用
+SITE_URL=http://localhost:5173
+MOCK_SEND=1
+DEV_HELPER=1

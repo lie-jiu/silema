@@ -1,0 +1,502 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   死了吗 · 视觉系统「维生监护仪 · 夜视」
+   基调：床旁监护仪在暗房里的那种质感 —— 近黑蓝底、磷光信号、刻线面板、
+   等宽读数。默认暗黑；所有颜色走 token，不出现字面 white/black。
+   语义色与字号仍受 docs/mobile-ui.md §1.2 约束。
+   =========================================================================== */
+@theme {
+  /* 结构色 */
+  --color-canvas: #070b12;
+  --color-panel: #0e1520;
+  --color-panel-hi: #16202e;
+  --color-hair: rgb(203 223 255 / 0.1);
+  --color-hair-strong: rgb(203 223 255 / 0.18);
+  --color-ink: #e7eef8;
+  --color-surface: #070b12;
+
+  /* 信号色：暗底上要提亮并带辉光，压低饱和避免刺眼 */
+  --color-primary: #4d8dff;
+  --color-primary-ink: #9dc0ff;
+  --color-primary-deep: #1e3a8a;
+  --color-ok: #2fd39a;
+  --color-warn: #f2a63b;
+  --color-danger: #ff5f5f;
+
+  --radius-card: 14px;
+  --radius-field: 10px;
+  --radius-dialog: 18px;
+
+  /* 暗色下阴影几乎不可见，改用「描边 + 辉光」表达层次 */
+  --shadow-brand: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 18px 40px -24px rgb(0 0 0 / 0.9);
+  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 30px 60px -28px rgb(0 0 0 / 0.95);
+
+  /* 字号只允许 12 / 14 / 16 / 28 四档 + 一个仪表读数专用 display */
+  --text-label: 0.75rem;
+  --text-body: 0.875rem;
+  --text-sub: 1rem;
+  --text-num: 1.75rem;
+  --text-display: 2.75rem;
+
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --animate-pulse: pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Tailwind v4 的 border-* / translate-* / ring-* 依赖 @property 注册的 --tw-* 默认值。
+   CSS 以 Vite `?inline` 字符串注入 <style> 时 @property 规则会被整条丢掉，未注册变量在
+   computed-value 阶段失效 → 边框宽度归零、位移与描边整体不生效。这里补回 initial-value。
+   必须写在 @layer base 内：未分层的作者样式优先级高于所有 @layer，写在外层会反向覆盖
+   工具类自己设置的 --tw-translate-x 等值。 */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    --tw-border-style: solid;
+    --tw-translate-x: 0;
+    --tw-translate-y: 0;
+    --tw-translate-z: 0;
+    --tw-ring-offset-width: 0px;
+    --tw-ring-offset-color: transparent;
+    --tw-ring-color: currentcolor;
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-ring-shadow: 0 0 #0000;
+  }
+
+  html {
+    /* 默认暗黑：表单控件 / dialog / 滚动条跟随深色渲染，与夜视面板一致 */
+    color-scheme: dark;
+    background-color: var(--color-canvas);
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    color: var(--color-ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC",
+      "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    font-size: var(--text-body);
+    line-height: 1.6;
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 底噪：只留极淡的 8px 刻线网格。不再叠顶部径向冷光 —— 那会让页面顶端比别处亮，
+     任何带压色的吸顶条都被衬成一条「黑底带」。 */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      repeating-linear-gradient(to right, rgb(203 223 255 / 0.03) 0 1px, transparent 1px 8px),
+      repeating-linear-gradient(to bottom, rgb(203 223 255 / 0.03) 0 1px, transparent 1px 8px);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 40%, transparent);
+    color: #fff;
+  }
+
+  /* 心电走线：内联 SVG，避免外部字体/图片请求（CSP img-src 'self' data:） */
+  :root {
+    --ecg-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='34' viewBox='0 0 240 34' fill='none'%3E%3Cpath d='M0 17h26l5-8 7 21 6-13h20l5-4 6 8 5-4h36l5-8 7 21 6-13h26' stroke='%232fd39a' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}
+
+/* ---------------------------------------------------------------- utilities */
+
+/* 安全区：Shell A 无 NavBar 也必须让出顶部（docs/mobile-ui.md §1.3） */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility tap-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+/* 等宽读数 */
+@utility readout {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+/* 面板上的微型标签 */
+@utility micro {
+  font-size: var(--text-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--color-ink) 52%, transparent);
+}
+
+/* --------------------------------------------------------------- components */
+@layer components {
+  /* 仪器面板：深色磨砂 + 顶部一道内高光 + 冷描边 */
+  .panel {
+    position: relative;
+    border-radius: var(--radius-card);
+    background: linear-gradient(180deg, var(--color-panel-hi) 0%, var(--color-panel) 62%);
+    border: 1px solid var(--color-hair);
+    box-shadow: var(--shadow-brand);
+  }
+  .panel::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.12) 20% 80%, transparent);
+  }
+  .panel-alert {
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-danger) 14%, var(--color-panel-hi)) 0%, var(--color-panel) 70%);
+    border-color: color-mix(in oklab, var(--color-danger) 42%, transparent);
+  }
+  /* 面板四角的刻度角标 */
+  .panel-ticks::before {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    border-radius: 4px;
+    pointer-events: none;
+    background:
+      linear-gradient(var(--color-ink), var(--color-ink)) left top / 1px 8px,
+      linear-gradient(var(--color-ink), var(--color-ink)) left top / 8px 1px,
+      linear-gradient(var(--color-ink), var(--color-ink)) right bottom / 1px 8px,
+      linear-gradient(var(--color-ink), var(--color-ink)) right bottom / 8px 1px;
+    opacity: 0.16;
+  }
+
+  /* 分区标题：文字 + 一条延伸到右边的刻线 */
+  .rule {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .rule::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--color-hair-strong), transparent);
+  }
+
+  /* 信号指示灯：暗底上必须有辉光才像灯 */
+  .led {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow:
+      0 0 6px 1px color-mix(in oklab, currentColor 65%, transparent),
+      0 0 0 3px color-mix(in oklab, currentColor 14%, transparent);
+  }
+  .led-live {
+    animation: led 2.4s ease-in-out infinite;
+  }
+
+  /* 输入控件：内凹深色，聚焦时主色辉光 */
+  .field {
+    width: 100%;
+    height: 46px;
+    padding: 0 13px;
+    border-radius: var(--radius-field);
+    border: 1px solid var(--color-hair);
+    background: rgb(3 7 12 / 0.55);
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.45);
+    font-size: var(--text-sub);
+    color: var(--color-ink);
+    outline: none;
+    transition: border-color 0.16s, box-shadow 0.16s, background-color 0.16s;
+  }
+  textarea.field {
+    height: auto;
+    padding: 10px 13px;
+    line-height: 1.65;
+  }
+  .field:focus {
+    border-color: color-mix(in oklab, var(--color-primary) 70%, transparent);
+    background: rgb(3 7 12 / 0.75);
+    box-shadow:
+      inset 0 2px 6px rgb(0 0 0 / 0.4),
+      0 0 0 3px color-mix(in oklab, var(--color-primary) 20%, transparent);
+  }
+  .field::placeholder {
+    color: rgb(231 238 248 / 0.26);
+  }
+  .field option {
+    background: var(--color-panel);
+    color: var(--color-ink);
+  }
+
+  /* 按钮：主按钮是发光的信号键，次级是冷描边键 */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 48px;
+    padding: 0 18px;
+    border-radius: var(--radius-field);
+    font-size: var(--text-sub);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: transform 0.12s ease, box-shadow 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.995);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+  }
+  .btn-primary {
+    color: #f2f7ff;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 92%, #fff) 0%, var(--color-primary-deep) 140%);
+    border: 1px solid color-mix(in oklab, var(--color-primary) 60%, #fff);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.28),
+      0 0 22px -6px color-mix(in oklab, var(--color-primary) 75%, transparent);
+  }
+  .btn-ghost {
+    color: var(--color-primary-ink);
+    background: rgb(77 141 255 / 0.08);
+    border: 1px solid rgb(77 141 255 / 0.34);
+  }
+  .btn-danger {
+    color: var(--color-danger);
+    background: rgb(255 95 95 / 0.08);
+    border: 1px solid color-mix(in oklab, var(--color-danger) 40%, transparent);
+  }
+  .btn-flat {
+    color: rgb(231 238 248 / 0.78);
+    background: rgb(203 223 255 / 0.05);
+    border: 1px solid var(--color-hair);
+  }
+
+  /* 长按签到大圆：外圈刻度 + conic 进度环 + 内盘 */
+  .dial-host {
+    position: relative;
+    width: 148px;
+    height: 148px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .dial {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: conic-gradient(
+      from -90deg,
+      var(--color-primary) calc(var(--p, 0) * 1%),
+      rgb(203 223 255 / 0.12) 0
+    );
+    filter: drop-shadow(0 0 10px color-mix(in oklab, var(--color-primary) calc(var(--p, 0) * 55%), transparent));
+    -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 65.5%, #000 66% 100%);
+    mask: radial-gradient(circle at 50% 50%, transparent 0 65.5%, #000 66% 100%);
+    transition: transform 0.18s ease;
+  }
+  .dial-host:active .dial {
+    transform: scale(1.03);
+  }
+  .dial-ticks {
+    position: absolute;
+    inset: -13px;
+    border-radius: 999px;
+    background: repeating-conic-gradient(
+      from -90deg,
+      rgb(203 223 255 / 0.3) 0 0.7deg,
+      transparent 0.7deg 6deg
+    );
+    -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 85%, #000 85.5% 93%, transparent 93.5%);
+    mask: radial-gradient(circle at 50% 50%, transparent 0 85%, #000 85.5% 93%, transparent 93.5%);
+    pointer-events: none;
+  }
+  .dial-face {
+    position: absolute;
+    inset: 11px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 50% 28%, #1b2739 0%, #0b1220 78%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.09),
+      inset 0 0 0 1px rgb(203 223 255 / 0.07),
+      0 24px 50px -24px rgb(0 0 0 / 0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    pointer-events: none;
+    transition: transform 0.18s ease, background 0.2s ease;
+  }
+  .dial-host:active .dial-face {
+    transform: scale(0.97);
+  }
+  .dial-live .dial-face {
+    background: radial-gradient(
+      circle at 50% 28%,
+      color-mix(in oklab, var(--color-primary) 30%, #16202e) 0%,
+      #0b1220 80%
+    );
+  }
+
+  /* 吸顶/吸底条：压色 + 磨砂。底色必须与页面基色一致，否则会在顶/底显出一条色带；
+     只磨砂不压色则内容滚过来时文字会透出来糊成一片。两个都得有。 */
+  .appbar {
+    background-color: rgb(7 11 18 / 0.86);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    backdrop-filter: blur(14px) saturate(130%);
+  }
+
+  /* 心电走线：夜视磷光绿，带辉光 */
+  .ecg {
+    height: 34px;
+    background-image: var(--ecg-svg);
+    background-repeat: repeat-x;
+    background-size: 240px 34px;
+    background-position: left center;
+    filter: drop-shadow(0 0 5px rgb(47 211 154 / 0.55));
+    opacity: 0.85;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18% 82%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 18% 82%, transparent);
+  }
+  .ecg-live {
+    animation: sweep 9s linear infinite;
+  }
+
+  /* 列表行 */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 56px;
+    padding: 12px 16px;
+    transition: background-color 0.14s ease;
+  }
+  .row + .row {
+    border-top: 1px solid rgb(203 223 255 / 0.06);
+  }
+  a.row:active {
+    background: rgb(203 223 255 / 0.05);
+  }
+
+  /* 载入骨架 */
+  .skeleton {
+    border-radius: 6px;
+    background: linear-gradient(90deg, rgb(203 223 255 / 0.05) 25%, rgb(203 223 255 / 0.1) 37%, rgb(203 223 255 / 0.05) 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  /* 按钮内联加载指示：htmx 请求进行中才出现 */
+  .btn-spinner {
+    display: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 999px;
+    border: 2px solid currentColor;
+    border-bottom-color: transparent;
+    animation: spin 0.7s linear infinite;
+  }
+  .htmx-request .btn-spinner,
+  .htmx-request.btn-spinner {
+    display: inline-block;
+  }
+  .htmx-indicator {
+    display: none;
+  }
+  .htmx-request.htmx-indicator,
+  .htmx-request .htmx-indicator {
+    display: inline-flex;
+  }
+  button.htmx-request:not(.htmx-indicator) {
+    opacity: 0.62;
+  }
+
+  /* 折叠块 */
+  details.panel > summary {
+    list-style: none;
+  }
+  details.panel > summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------- 动效 */
+@keyframes led {
+  0%,
+  100% {
+    box-shadow:
+      0 0 6px 1px color-mix(in oklab, currentColor 65%, transparent),
+      0 0 0 3px color-mix(in oklab, currentColor 14%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 12px 2px color-mix(in oklab, currentColor 75%, transparent),
+      0 0 0 5px color-mix(in oklab, currentColor 8%, transparent);
+  }
+}
+@keyframes sweep {
+  to {
+    background-position: 240px center;
+  }
+}
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 面板依次升起：用 --i 排期，页面载入即是一次「仪表上电」 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes roll {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.roll {
+  animation: roll 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hx-swapping {
+  opacity: 0.45;
+  transition: opacity 0.2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

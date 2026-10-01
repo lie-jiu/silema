@@ -1,0 +1,33 @@
+{
+  "name": "silema",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite build && wrangler dev",
+    "db:init": "wrangler d1 execute silema --local --file=./migrations/0001_init.sql",
+    "db:seed": "node scripts/seed-local.cjs",
+    "setup": "wrangler d1 execute silema --local --file=./migrations/0001_init.sql && node scripts/seed-local.cjs",
+    "test": "vitest run",
+    "deploy": "vite build && wrangler deploy"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "0.9.1",
+    "hono": "4.13.12",
+    "htmx.org": "2.0.11",
+    "otpauth": "9.5.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.62.3",
+    "@cloudflare/workers-types": "5.20261001.1",
+    "@tailwindcss/vite": "4.3.3",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.3",
+    "wrangler": "4.145.0"
+  }
+}

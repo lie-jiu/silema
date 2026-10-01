@@ -1,0 +1,125 @@
+{
+  "skill": "flow-mobile",
+  "project_name": "silema",
+  "scenario": "Productivity / 习惯打卡（每日仪式 + Streak），管理台部分无 canonical 匹配",
+  "tech_stack": "H5 — Hono JSX SSR + htmx 2 + Tailwind CSS 4（antd-mobile 仅保留为 Shell B 的升级路径）",
+  "component_library": "无框架：原生 HTML（dialog/details/select）+ Tailwind 4 + htmx 2；升级路径 antd-mobile v5",
+  "generated_at": "2026-10-01T00:00:00+08:00",
+  "upstream_context": "none（项目下无 spark-output/，未跑 brief/sitemap/stories）",
+  "delivery_form": "design-doc-only",
+  "primary_artifact": "docs/mobile-ui.md",
+  "source_of_truth": "docs/backend.md",
+  "navigation": {
+    "shells": [
+      { "id": "shell-a", "name": "公开签到落地页", "mode": "stack-single", "auth": false, "tabbar": false },
+      { "id": "shell-b", "name": "后台管理台", "mode": "bottom-tabbar-3", "auth": "jwt-12h-single-session" }
+    ],
+    "tabs": ["dashboard", "recipients", "settings"]
+  },
+  "flows": [
+    {
+      "name": "每日签到仪式",
+      "canonical_ref": "productivity.md Flow 4（习惯打卡）+ 独有决策 5（打卡仪式感）",
+      "differences": [
+        "无 7 天日期条：后端无签到流水，只有 streak 数字 + checkedToday 布尔",
+        "禁止 confetti/粒子：情绪基调克制，非成就解锁",
+        "长按 0.6s 触发而非单点：令牌一次性消费，需防误触"
+      ],
+      "entry": "消息内 {checkin_url} -> GET /c/:token（服务端渲染，首屏即终态之一）",
+      "screens": [
+        { "page_id": "checkin-confirm", "name": "待确认", "file_path": "docs/mobile-ui.md#screen-1--checkin-confirm待确认", "main_action": "长按大圆 0.6s 签到" },
+        { "page_id": "checkin-done", "name": "签到成功", "file_path": "docs/mobile-ui.md#screen-2--checkin-done成功", "main_action": "只读反馈（locked 恢复时文案不同）" },
+        { "page_id": "checkin-end", "name": "终态：已签到/已失效", "file_path": "docs/mobile-ui.md#screen-3--checkin-end已签到--已失效", "main_action": "已失效变体可跳后台" }
+      ],
+      "exit_states": { "success": "checkin-done", "error": "inline 错误条 + 重试（不用 Toast）", "abandon": "长按未满 0.6s 松手，进度环回弹不发请求" }
+    },
+    {
+      "name": "后台登录 + 仪表盘",
+      "canonical_ref": "productivity.md IA Template；登录部分参照 Flow 4 Screen 3-5 全屏单列表单",
+      "differences": [
+        "3 Tab 而非 4-5 Tab：单用户、仅 3 个平级功能区",
+        "新增 401 全屏拦截屏：JWT 12h + 单会话会被其他设备静默踢下线",
+        "仪表盘刻意无签到按钮：后端不提供该能力，需显式解释"
+      ],
+      "entry": "checkin-end 的「打开后台」/ 直接访问 /admin / TabBar 未登录重定向",
+      "screens": [
+        { "page_id": "login", "name": "登录", "file_path": "docs/mobile-ui.md#screen-1--login", "main_action": "用户名+密码+TOTP 单次提交" },
+        { "page_id": "dashboard", "name": "仪表盘", "file_path": "docs/mobile-ui.md#screen-2--dashboardtab-1", "main_action": "看状态 + 重发今日链接（二次确认）" },
+        { "page_id": "session-expired", "name": "会话已失效", "file_path": "docs/mobile-ui.md#screen-3--session-expired401-全屏拦截", "main_action": "重新登录" }
+      ],
+      "exit_states": { "success": "落到仪表盘，今日状态灯绿", "error": "四类登录文案（凭据/TOTP/限流倒计时/503）", "abandon": "登录页不保存输入" }
+    },
+    {
+      "name": "接收人管理",
+      "canonical_ref": "productivity.md Flow 1/2 + 独有决策 4（配置在单页内完成）+ Anti-Pattern 3",
+      "differences": [
+        "无 FAB：低频配置操作，全局 FAB 会误触并抢签到页视觉重心",
+        "无分页/触底加载：单人项目最多几条",
+        "无 Undo，改二次确认 Dialog：删除后靠用户重建，重发链接不可逆"
+      ],
+      "entry": "TabBar 接收人 / 仪表盘空态 CTA",
+      "screens": [
+        { "page_id": "recipients", "name": "接收人列表", "file_path": "docs/mobile-ui.md#screen-1--recipientstab-2", "main_action": "新增/编辑/左滑删除" },
+        { "page_id": "recipient-edit", "name": "新增或编辑（单页多 Section）", "file_path": "docs/mobile-ui.md#screen-2--recipient-edit新增--编辑单页多-section", "main_action": "7 通道动态凭据 + 事件订阅 + 三类文案" },
+        { "page_id": "recipient-test", "name": "测试发送（半屏 Popup）", "file_path": "docs/mobile-ui.md#screen-3--recipient-test半屏-popup", "main_action": "真实发送测试消息" },
+        { "page_id": "recipient-delete", "name": "删除确认 Dialog", "file_path": "docs/mobile-ui.md#screen-4--recipient-deletedialog", "main_action": "删除 / 409 拒绝态" }
+      ],
+      "exit_states": { "success": "pop 回列表 + Toast", "error": "字段级 inline + 提交级 banner + 409 拒绝态", "abandon": "有改动时返回触发放弃编辑 Dialog" }
+    },
+    {
+      "name": "设置与安全",
+      "canonical_ref": "productivity.md IA Template Tab 5；健康/安全详情无 canonical 匹配",
+      "differences": [
+        "无签到时间设置：cron 固定在 wrangler.toml，需显式说明改不了",
+        "健康判定规则必须显式画出（13h/25h 阈值 + locked 豁免 + 双心跳分列）"
+      ],
+      "entry": "TabBar 设置",
+      "screens": [
+        { "page_id": "settings", "name": "设置主页", "file_path": "docs/mobile-ui.md#screen-1--settingstab-3", "main_action": "改时区 / 进健康与安全" },
+        { "page_id": "health-detail", "name": "巡检健康详情", "file_path": "docs/mobile-ui.md#screen-2--health-detail", "main_action": "判断系统是否还在正常跑" },
+        { "page_id": "security", "name": "账号安全", "file_path": "docs/mobile-ui.md#screen-3--security", "main_action": "注销所有设备 / 查看 TOTP 恢复路径" }
+      ],
+      "exit_states": { "success": "时区原地回显；注销后回登录页", "error": "时区 400 inline；健康数据取不到时显示未知灰并标红，不默认绿", "abandon": "注销 Dialog 可取消" }
+    }
+  ],
+  "design_tokens": {
+    "colors": { "primary": "靛蓝（保守/安全设备基调）", "ok": "绿", "warn": "琥珀", "danger": "红", "usage": "主色只给唯一主操作，重发链接用 outlined" },
+    "font_sizes": [12, 14, 16, 28],
+    "font_weights": [400, 600],
+    "spacing": [4, 8, 12, 16, 24, 32],
+    "radius": { "card": 12, "input": 8, "dialog": 16 },
+    "shadow": "0 2px 12px rgba(37,99,235,.10)（禁止纯黑硬阴影）",
+    "numeric": "所有数字 font-variant-numeric: tabular-nums",
+    "hierarchy": "用 opacity 分层（1.0/0.8/0.6），不用多种灰色 HEX"
+  },
+  "mobile_rules": {
+    "safe_area": "顶部 env(safe-area-inset-top)（Shell A 无 NavBar 也要让）；底部所有吸底元素叠加 inset-bottom",
+    "keyboard": { "login": "主按钮跟随键盘上移", "recipient-edit": "吸底常驻不跟随，页面滚动", "checkin": "无输入" },
+    "gestures": { "long_press": "仅签到（0.6s 进度环）", "swipe_left": "仅接收人删除", "pull_to_refresh": "仪表盘 + 接收人列表", "forbidden": ["hover", "tooltip", "双击", "pinch"] },
+    "touch_target": ">= 44x44px，图标需外层 44px 容器",
+    "container": "width:100% + maxWidth:430 + minHeight:100vh；TabBar 用 flex 列布局，禁止 position:fixed",
+    "state_matrix": "每屏 5 态：默认 / 加载（骨架，非全屏遮罩）/ 空（必带 CTA）/ 错误（必带恢复路径）/ 无网络（与 500 区分文案）",
+    "false_negative_redline": "健康灯、cron 状态、checkedToday 取不到数据时显示未知灰并标红，绝不默认绿"
+  },
+  "missing_components": [
+    { "name": "长按进度环按钮", "current": "ProgressBar + 手写 pointer 事件", "reason": "全站唯一签到入口，防误触与仪式感都压在它身上" },
+    { "name": "PasscodeInput", "current": "Input + inputmode=numeric + 字距模拟", "reason": "不在套件 sanctioned 清单内；若可用应直接替换，TOTP 体验更好" },
+    { "name": "NoticeBar", "current": "自定义语义色底 div", "reason": "不在 sanctioned 清单内；约束条/掩码说明/测试警示/健康规则共 5 处需要" },
+    { "name": "缺席进度点 0/4", "current": "自绘 4 个圆点", "reason": "ProgressBar 是连续条，表达不了 4 个离散天数 + 第 3 个变红" }
+  ],
+  "quality_self_check": {
+    "p1": "6 项全部在规格中约束（SafeArea / 44px / 无硬编码色 / width:100% / 图标名核对 / 主 CTA 在拇指区）",
+    "p2": "11 项已落点；P2-1 长列表虚拟化与 P2-7 搜索页判定为不适用",
+    "p3": "5 项满足（P3-4/6/7/8/9/10），4 项不适用（无内购/Paywall/权限/图片）",
+    "anti_pattern": "7 条对照完成，1 条有意偏离（Undo 改二次确认）"
+  },
+  "backend_constraints_honored": [
+    "后台无签到按钮（backend.md:97,226）",
+    "无签到流水 -> 无日期条/热力图（backend.md:110）",
+    "令牌一次性消费 -> 长按防误触（backend.md:64）",
+    "凭据掩码哨兵 -> 输入框常驻说明（backend.md:242）",
+    "on_final >= 1 -> 409 拒绝态文案（backend.md:241）",
+    "cron 时间固定 -> 设置页显式说明不可改（backend.md:37）",
+    "单会话 JWT -> 401 全屏拦截页（backend.md:202,206）"
+  ]
+}

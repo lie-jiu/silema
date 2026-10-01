@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "silema",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "silema",
+      "database_id": "silema-local",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    // 北京 12:00 发送 / 北京 24:00 判定（cron 表达式为 UTC）
+    "crons": ["0 4 * * *", "0 16 * * *"]
+  },
+  "vars": {
+    "SITE_URL": "https://slm.liejiu.top",
+    "MOCK_SEND": "0"
+  }
+}
