@@ -14,8 +14,12 @@ CRON_SECRET=
 EMAIL_API_KEY=
 EMAIL_FROM=
 
-# 外部心跳（Healthchecks.io 式），按 job 拆成两个 check（docs/backend.md §7）
-HEARTBEAT_URL=
+# 外部心跳（Healthchecks.io 式），两个 job 各一个独立 check：send 阈值 13h、judge 阈值 25h（docs/backend.md §7）。
+# 共用一个 check 时 12:00 的 send 会把 judge 静默不跑也一起喂掉，永远不会告警。
+# 填 check 的 ping 地址（不含末尾的 /pass 或 /fail），任务跑到就 POST <URL>/pass，失败则 <URL>/fail。
+# 告警接收方必须独立于所有者本人——这套兜底的前提就是所有者已失联。
+HEARTBEAT_SEND_URL=
+HEARTBEAT_JUDGE_URL=
 
 # 本地预览专用
 SITE_URL=http://localhost:5173

@@ -63,7 +63,12 @@ document.addEventListener("click", async (e) => {
       if (slot) slot.textContent = (await res.text()).slice(0, 200);
       return;
     }
-    location.assign(btn.getAttribute("data-post-go") || location.pathname);
+    const target = btn.getAttribute("data-post-go") || location.pathname;
+    const go = new URL(target, location.origin);
+    // 服务端把「名单变更告知」的结果放在这个响应头里，跳转前并回 query 才能在下一页如实显示
+    const notice = res.headers.get("X-Notice");
+    if (notice) go.searchParams.set("notice", notice);
+    location.assign(go.href);
   } catch {
     delete btn.dataset.busy;
     btn.disabled = false;

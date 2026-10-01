@@ -13,7 +13,7 @@ export type RecipientRow = {
   created_at: number;
 };
 
-export function configOf(row: RecipientRow): Record<string, string> {
+export function configOf(row: Pick<RecipientRow, "config_json">): Record<string, string> {
   try {
     const parsed = JSON.parse(row.config_json) as Record<string, unknown>;
     return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v ?? "")]));

@@ -129,7 +129,9 @@ export function RecipientsPage(props: {
             body={
               row.on_final === 1 && finalCount === 1
               ? "至少需要保留一位紧急联系人。要删除这一位，请先指定另一位接收「最终消息」。"
-              : "该通道将不再收到任何通知。"
+              : row.on_final === 1
+                ? "该通道将不再收到任何通知。删除后会向 TA 本人以及其余紧急联系人发出一条变更告知。"
+                : "该通道将不再收到任何通知。"
             }
             confirmText={row.on_final === 1 && finalCount === 1 ? "知道了" : "删除"}
             post={row.on_final === 1 && finalCount === 1 ? undefined : `/api/recipients/${row.id}/delete`}
@@ -281,7 +283,7 @@ export function RecipientEditPage(props: {
           <Card>
             <div class="micro mb-2">事件订阅</div>
             <Switch name="onPrompt" checked={props.values.onPrompt} label="日常提醒" desc="12:00 签到链接 + 24:00 未签到提醒" />
-            <Switch name="onFinal" checked={props.values.onFinal} label="紧急联系人" desc="锁死时接收最终消息" />
+            <Switch name="onFinal" checked={props.values.onFinal} label="紧急联系人" desc="锁死时接收最终消息；名单或接收方式变动时会告知变更前的所有人" />
           </Card>
 
           <Card class="flex flex-col gap-4">

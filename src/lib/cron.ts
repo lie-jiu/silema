@@ -87,10 +87,16 @@ async function fanout(
   return { ok, failed: rows.length - ok, errors };
 }
 
+/**
+ * 心跳监控的是「调度器有没有跑到这一步」，不是「消息有没有发出去」。
+ * 所以按设计跳过的路径（locked 不发日常链接、12h 幂等守卫、已送达的锁定期）同样要喂狗——
+ * 否则一次锁死会让两个 check 在整个期间天天误报，而告警接收方是紧急联系人。
+ * 两个 job 各一个独立 check URL（docs/backend.md §7）。
+ */
 async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void> {
-  if (!env.HEARTBEAT_URL) return;
-  const base = env.HEARTBEAT_URL.replace(/\/+$/, "");
-  const url = `${base}/${job}/${ok ? "pass" : "fail"}`;
+  const base = job === "send" ? env.HEARTBEAT_SEND_URL : env.HEARTBEAT_JUDGE_URL;
+  if (!base) return;
+  const url = `${base.replace(/\/+$/, "")}/${ok ? "pass" : "fail"}`;
   try {
     await fetch(url, { method: "POST", body: "", signal: AbortSignal.timeout(3_000) });
   } catch {
@@ -107,10 +113,12 @@ export async function runSend(env: Env, opts: { force?: boolean; now?: number } 
     return { ran: false, job: "send", sent: 0, failed: 0, detail: "owner 行不存在，先跑 init-owner", error: "[send] owner 行不存在" };
   }
   if (owner.state === "locked") {
+    await ping(env, "send", true);
     await housekeeping(db, now);
     return { ran: false, job: "send", skipped: "locked 态不发送日常链接", sent: 0, failed: 0, detail: "跳过", error: null };
   }
   if (!opts.force && owner.last_send_at != null && now - owner.last_send_at < GUARD_MS) {
+    await ping(env, "send", true);
     await housekeeping(db, now);
     return { ran: false, job: "send", skipped: "距上次发送不足 12 小时", sent: 0, failed: 0, detail: "跳过", error: null };
   }
@@ -159,6 +167,7 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
     return { ran: false, job: "judge", sent: 0, failed: 0, detail: "owner 行不存在，先跑 init-owner", error: "[judge] owner 行不存在" };
   }
   if (!opts.force && now - owner.last_judge_at < GUARD_MS) {
+    await ping(env, "judge", true);
     await housekeeping(db, now);
     return { ran: false, job: "judge", skipped: "距上次判定不足 12 小时", sent: 0, failed: 0, detail: "跳过", error: null };
   }
@@ -287,6 +296,7 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
 async function runLockedResend(env: Env, owner: OwnerRow, now: number): Promise<CronSummary> {
   const db = env.DB;
   if (owner.final_sent_at != null) {
+    await ping(env, "judge", true);
     await setCronHealth(db, now, owner.last_cron_status === "error" ? "error" : "ok", owner.last_cron_error);
     await recordJudge(db, now);
     return {
@@ -336,7 +346,15 @@ async function stillAbsent(db: D1Database, windowStart: number): Promise<boolean
   return !(fresh.last_checkin_at != null && fresh.last_checkin_at >= windowStart);
 }
 
-function abandoned(env: Env, now: number, windowStart: number): CronSummary {
+/**
+ * 期间发生了签到：放弃本次判定、不发任何消息，也不回滚已经写下的东西（§2.2 step 5）。
+ * 但这一次任务确实跑到了，所以照常推进 last_judge_at 并喂狗——窗口起点前移是安全的，
+ * 那次签到落在旧窗口内，新窗口要求一次新的签到。
+ */
+async function abandoned(env: Env, now: number, windowStart: number): Promise<CronSummary> {
+  await recordJudge(env.DB, now);
+  await ping(env, "judge", true);
+  await housekeeping(env.DB, now);
   return {
     ran: false,
     job: "judge",

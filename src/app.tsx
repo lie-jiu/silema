@@ -4,12 +4,13 @@ import type { Context } from "hono";
 
 import { performCheckin, resolveView, type CheckinView } from "./lib/checkin";
 import { isChannelType, mergeConfig, unsafeWebhookUrl, validateConfig, type ChannelType } from "./lib/channels";
+import { configsDiffer, notifyContactChange, targetBrief, type NoticeOutcome } from "./lib/contact-change";
 import { runJudge, runSend } from "./lib/cron";
 import { checkedThisCycle, getOwner, writeWithRetry, type OwnerRow } from "./lib/db";
 import { healthOf } from "./lib/health";
 import { render } from "./lib/messages";
 import { clearRateLimit, hitRateLimit } from "./lib/rate-limit";
-import { configOf, countFinal, deleteRecipient, getRecipient, insertRecipient, listRecipients, updateRecipient } from "./lib/recipients";
+import { configOf, countFinal, deleteRecipient, finalRecipients, getRecipient, insertRecipient, listRecipients, updateRecipient } from "./lib/recipients";
 import { deliver, getOutbox, isMock, type Env } from "./lib/send";
 import { missingSecrets, requireAuth, securityHeaders, wantsHtmx } from "./lib/security";
 import { clearSessionCookie, issueSession, readSession, SESSION_COOKIE, sessionCookie } from "./lib/session";
@@ -375,8 +376,19 @@ function flashOf(c: { req: { query: (k: string) => string | undefined } }, key?:
     tz: { tone: "ok", text: "时区已更新。" },
     checked: { tone: "ok", text: "已确认。" },
   };
-  return f ? (map[f] ?? null) : null;
+  const base = f ? (map[f] ?? null) : null;
+  if (!base) return null;
+  const notice = NOTICE_TEXT[c.req.query("notice") ?? ""];
+  if (!notice) return base;
+  return { tone: notice.tone, text: `${base.text}${notice.text}` };
 }
+
+/** 名单变更告知的结果由服务端写在跳转 query 上，只取这几个固定值，不回显任何用户输入。 */
+const NOTICE_TEXT: Record<string, { tone: "ok" | "warn"; text: string }> = {
+  ok: { tone: "ok", text: "已向变更前的紧急联系人（含被移除那位本人）发出变更告知。" },
+  partial: { tone: "warn", text: "变更告知只送达一部分，请到接收人列表里核对通道。" },
+  fail: { tone: "warn", text: "变更告知一条都没送达，请到接收人列表里核对通道。" },
+};
 
 app.get("/admin", async (c) => c.html(await renderDashboard(c, c.req.query("flash"))));
 
@@ -553,7 +565,8 @@ app.post("/api/recipients", async (c) => {
       400,
     );
   }
-  await insertRecipient(c.env.DB, {
+  const now = Date.now();
+  const row = {
     label: v.label,
     channel_type: v.channelType,
     config_json: JSON.stringify(v.config),
@@ -562,9 +575,21 @@ app.post("/api/recipients", async (c) => {
     prompt_content: v.promptContent,
     reminder_content: v.reminderContent,
     final_content: v.finalContent,
-    created_at: Date.now(),
-  });
-  return c.redirect("/admin/recipients?flash=created", 302);
+    created_at: now,
+  };
+  // 变更前名单必须在写入之前取，取到的才是「当时被信任的那些人」
+  const prevFinal = v.onFinal ? await finalRecipients(c.env.DB) : [];
+  await insertRecipient(c.env.DB, row);
+  const outcome: NoticeOutcome = v.onFinal
+    ? await notifyContactChange(
+        c.env,
+        prevFinal,
+        `新增了一位紧急联系人：「${v.label}」（${targetBrief(row)}）。此后 TA 会在锁死时收到最终消息。`,
+        c.get("owner").timezone,
+        now,
+      )
+    : "none";
+  return c.redirect(`/admin/recipients?flash=created&notice=${outcome}`, 302);
 });
 
 /** 更新与删除各有两个入口：HTML 表单只能 POST（§1.1「状态变更一律 POST」），REST 面保留 PUT/DELETE。 */
@@ -575,8 +600,19 @@ async function deleteRecipientHandler(c: Context<{ Bindings: Bindings; Variables
   if (existing.on_final === 1 && (await countFinal(c.env.DB)) <= 1) {
     return c.text("至少需要保留一位紧急联系人。要删除这一位，请先指定另一位接收「最终消息」。", 409);
   }
+  // 快照必须在 DELETE 之前：被移除那位自己正是最需要知道的人
+  const prevFinal = existing.on_final === 1 ? await finalRecipients(c.env.DB) : [];
   await deleteRecipient(c.env.DB, id);
-  return c.body(null, 204);
+  const outcome: NoticeOutcome = prevFinal.length
+    ? await notifyContactChange(
+        c.env,
+        prevFinal,
+        `「${existing.label}」（${targetBrief(existing)}）已被移出紧急联系人名单，此后不会再收到最终消息。`,
+        c.get("owner").timezone,
+        Date.now(),
+      )
+    : "none";
+  return c.body(null, 204, outcome === "none" ? {} : { "X-Notice": outcome });
 }
 
 async function updateRecipientHandler(c: Context<{ Bindings: Bindings; Variables: Variables }>) {
@@ -586,6 +622,7 @@ async function updateRecipientHandler(c: Context<{ Bindings: Bindings; Variables
 
   const v = await readRecipientForm(c);
   const merged = mergeConfig(v.channelType, configOf(existing), v.config);
+  const nextJson = JSON.stringify(merged);
   const errors = validateRecipient(v, configOf(existing), c.env.SITE_URL);
   if (!v.onFinal && existing.on_final === 1 && (await countFinal(c.env.DB)) <= 1) {
     errors.push("至少需要保留一位紧急联系人");
@@ -596,18 +633,38 @@ async function updateRecipientHandler(c: Context<{ Bindings: Bindings; Variables
       400,
     );
   }
+
+  const wasFinal = existing.on_final === 1;
+  const isFinal = v.onFinal;
+  // 只有「进出紧急联系人名单」和「把已信任的人换到别的接收方式」才需要告知；改名与改文案不惊动任何人。
+  const retargeted =
+    wasFinal && isFinal && (existing.channel_type !== v.channelType || configsDiffer(existing.config_json, nextJson));
+  const change = !wasFinal && isFinal
+    ? `「${v.label}」被设为紧急联系人（${targetBrief({ channel_type: v.channelType, config_json: nextJson })}），将接收最终消息。`
+    : wasFinal && !isFinal
+      ? `「${existing.label}」已不再接收最终消息。`
+      : retargeted
+        ? `紧急联系人「${v.label}」的接收方式从 ${targetBrief(existing)} 变更为 ${targetBrief({ channel_type: v.channelType, config_json: nextJson })}。`
+        : "";
+  const prevFinal = change ? await finalRecipients(c.env.DB) : [];
+
   await updateRecipient(c.env.DB, {
     ...existing,
     label: v.label,
     channel_type: v.channelType,
-    config_json: JSON.stringify(merged),
+    config_json: nextJson,
     on_prompt: v.onPrompt ? 1 : 0,
     on_final: v.onFinal ? 1 : 0,
     prompt_content: v.promptContent,
     reminder_content: v.reminderContent,
     final_content: v.finalContent,
   });
-  return c.redirect("/admin/recipients?flash=saved", 302);
+
+  const now = Date.now();
+  const outcome: NoticeOutcome = change
+    ? await notifyContactChange(c.env, prevFinal, change, c.get("owner").timezone, now)
+    : "none";
+  return c.redirect(`/admin/recipients?flash=saved&notice=${outcome}`, 302);
 }
 
 app.post("/api/recipients/:id/save", updateRecipientHandler);

@@ -8,7 +8,9 @@ export type Env = {
   ADMIN_PASSWORD_HASH?: string;
   SESSION_SECRET?: string;
   CRON_SECRET?: string;
-  HEARTBEAT_URL?: string;
+  /** 外部心跳：按 job 两个独立 check，共用一个会让 send 每天喂狗、judge 静默不跑也不告警（docs/backend.md §7） */
+  HEARTBEAT_SEND_URL?: string;
+  HEARTBEAT_JUDGE_URL?: string;
   DEV_HELPER?: string;
   EMAIL_API_KEY?: string;
   EMAIL_FROM?: string;
@@ -167,7 +169,7 @@ function htmlBody(body: string): string {
   return `<div style="font:14px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap">${linked}</div>`;
 }
 
-function describeTarget(type: ChannelType, config: Record<string, string>): string {
+export function describeTarget(type: ChannelType, config: Record<string, string>): string {
   switch (type) {
     case "telegram":
       return `chat ${config.chatId ?? "?"}`;
