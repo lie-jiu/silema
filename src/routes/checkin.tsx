@@ -33,10 +33,11 @@ function Stage(props: StageProps): ReturnType<FC> {
   const { view } = props;
   if (props.test) return <TestView />;
   if (props.done) return <DoneView streak={props.done.streak} wasLocked={props.done.wasLocked} owner={view.owner} />;
-  if (props.error) return <ConfirmView {...props} token={{ token: "", expires_at: 0 }} error={props.error} />;
-  if (view.kind === "checked") return <CheckedView owner={view.owner} />;
-  if (view.kind === "invalid") return <InvalidView owner={view.owner} />;
-  return <ConfirmView {...props} token={view.token} />;
+  // 两个终态优先于 error：把「今日已签 / 链接已失效」降级成一个空令牌的确认页，
+  // 重试按钮就会 POST 到 /c//do（404），而「已失效」那页唯一能自救的后台入口也被藏掉了。
+  if (view.kind === "checked") return <CheckedView owner={view.owner} error={props.error} />;
+  if (view.kind === "invalid") return <InvalidView owner={view.owner} error={props.error} />;
+  return <ConfirmView {...props} token={view.token} error={props.error} />;
 }
 
 /** 顶部的生命体征走线：这个产品的全部意义就在这条线有没有断。 */
@@ -180,14 +181,16 @@ function Stat(props: { value: Child; label: string; tone?: "ok"; display?: boole
 }
 
 /** 「已使用」= 今天已经记到一次确认，系统是安全的，所以刻意不给任何按钮。 */
-function CheckedView(props: { owner: OwnerRow }): ReturnType<FC> {
+function CheckedView(props: { owner: OwnerRow; error?: string }): ReturnType<FC> {
   const o = props.owner;
   return (
     <div class="flex flex-col min-h-screen px-6">
       <div class="flex-1 flex items-center">
         <div class="w-full">
           <Pulse class="mb-8" />
-          <Result tone="ok" title="今日已确认" desc={`今天已经记到一次确认，系统是安全的。连续 ${o.streak} 天。`} />
+          <Result tone="ok" title="今日已确认" desc={`今天已经记到一次确认，系统是安全的。连续 ${o.streak} 天。`}>
+            {props.error ? <Notice tone="warn">{props.error}</Notice> : null}
+          </Result>
         </div>
       </div>
       <footer class="pb-safe pb-7 text-center">
@@ -201,7 +204,7 @@ function CheckedView(props: { owner: OwnerRow }): ReturnType<FC> {
 }
 
 /** 「已失效」= 今天无从签到，必须给后台入口；与上一态绝不共用文案。 */
-function InvalidView(props: { owner: OwnerRow }): ReturnType<FC> {
+function InvalidView(props: { owner: OwnerRow; error?: string }): ReturnType<FC> {
   const locked = props.owner.state === "locked";
   return (
     <div class="flex flex-col min-h-screen px-6">
@@ -217,6 +220,7 @@ function InvalidView(props: { owner: OwnerRow }): ReturnType<FC> {
                 : "这条链接只在当天有效。去后台可以重发今天的链接，或检查通知通道。"
             }
           >
+            {props.error ? <Notice tone="danger">{props.error}</Notice> : null}
             <a href="/admin" class="btn btn-ghost w-full">
               打开后台
             </a>

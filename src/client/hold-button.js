@@ -13,6 +13,7 @@ function install(el) {
   let startTime = 0;
   let raf = 0;
   let done = false;
+  let active = false;
 
   const stop = () => {
     if (raf) cancelAnimationFrame(raf);
@@ -43,28 +44,52 @@ function install(el) {
     if (start > 0) raf = requestAnimationFrame(step);
   };
 
-  const down = (e) => {
-    if (el.disabled || el.classList.contains("htmx-request") || done) return;
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    e.preventDefault();
-    stop();
-    startTime = performance.now();
-    raf = requestAnimationFrame(tick);
+  // 释放监听挂在 document 上：指针在按钮外松开时元素收不到 pointerup，只绑元素会让
+  // 「按下 → 拖出 → 松手」在 0.6s 到点时照样完成签到（误续命方向，比签不上更危险）。
+  const release = () => {
+    if (!active) return;
+    active = false;
+    document.removeEventListener("pointerup", release);
+    document.removeEventListener("pointercancel", release);
+    if (!done) rollback();
   };
 
-  const up = () => {
-    if (!done) rollback();
+  const start = () => {
+    if (el.disabled || el.classList.contains("htmx-request") || done) return;
+    stop();
+    active = true;
+    startTime = performance.now();
+    raf = requestAnimationFrame(tick);
+    document.addEventListener("pointerup", release);
+    document.addEventListener("pointercancel", release);
+  };
+
+  const down = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    start();
+  };
+
+  // JS 开启时 <noscript> 表单不生效，键盘用户必须有等价的长按路径
+  const isHoldKey = (e) => e.key === " " || e.key === "Spacebar" || e.key === "Enter";
+  const keyDown = (e) => {
+    if (!isHoldKey(e) || e.repeat || active) return;
+    e.preventDefault();
+    start();
+  };
+  const keyUp = (e) => {
+    if (isHoldKey(e)) release();
   };
 
   const reset = () => {
     done = false;
+    active = false;
     progress(el, 0);
   };
 
   el.addEventListener("pointerdown", down);
-  el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", up);
-  el.addEventListener("lostpointercapture", up);
+  el.addEventListener("keydown", keyDown);
+  el.addEventListener("keyup", keyUp);
   el.addEventListener("contextmenu", (e) => e.preventDefault());
   el.addEventListener("htmx:afterSwap", reset);
   el.addEventListener("htmx:responseError", reset);
@@ -73,8 +98,12 @@ function install(el) {
 
 for (const el of document.querySelectorAll("[data-hold-post]")) install(el);
 
-// htmx swap 进来的新确认按钮（错误后重试重渲染）同样要装监听
+// htmx swap 进来的新确认按钮（错误后重试重渲染）同样要装监听。
+// htmx:load 的 target 是 swap 进去的**顶层节点**（这里是 #checkin-stage 包装层），按钮是它的
+// 后代，所以必须连子树一起扫——只判断 target 自身会让换入的重试按钮永远绑不上。
 document.body.addEventListener("htmx:load", (e) => {
   const el = e.target;
-  if (el instanceof HTMLElement && el.matches("[data-hold-post]")) install(el);
+  if (!(el instanceof HTMLElement)) return;
+  if (el.matches("[data-hold-post]")) install(el);
+  for (const host of el.querySelectorAll("[data-hold-post]")) install(host);
 });
