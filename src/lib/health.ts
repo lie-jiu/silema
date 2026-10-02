@@ -35,7 +35,7 @@ export function healthOf(owner: OwnerRow | null, now: number): Health {
 
   let send: Health["send"];
   if (owner.state === "locked") {
-    send = { level: "ok", hours: sendHours, note: "锁死期间不发送，属正常" };
+    send = { level: "ok", hours: sendHours, note: "锁死期间不再发日常链接，此读数停住属正常" };
   } else if (sendHours == null) {
     send = { level: "unknown", hours: null, note: "从未发出过链接" };
   } else if (sendHours > SEND_LIMIT_H) {

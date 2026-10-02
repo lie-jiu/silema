@@ -286,7 +286,7 @@ export function RecipientEditPage(props: {
 
           <Card>
             <div class="micro mb-2">事件订阅</div>
-            <Switch name="onPrompt" checked={props.values.onPrompt} label="日常提醒" desc="12:00 签到链接 + 24:00 未签到提醒" />
+            <Switch name="onPrompt" checked={props.values.onPrompt} label="日常提醒" desc="每天 12:00 唯一的那条消息；24:00 判定为缺席后，次日这条自动换成未签到提醒" />
             <Switch name="onFinal" checked={props.values.onFinal} label="紧急联系人" desc="锁死时接收最终消息；名单或接收方式变动时会告知变更前的所有人" />
           </Card>
 
@@ -304,7 +304,7 @@ export function RecipientEditPage(props: {
             <MessageBlock
               id="reminderContent"
               name="reminderContent"
-              label="未签到提醒"
+              label="未签到提醒（缺席期替换当日那条，仍是同一天唯一的一条消息）"
               value={props.values.reminderContent}
               event="reminder"
               needed={props.values.onPrompt}

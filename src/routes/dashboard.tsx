@@ -76,7 +76,7 @@ export function DashboardPage(props: {
               {locked
                 ? "锁死已触发，凭最终消息里的恢复链接签到即解除。"
                 : o.missed_streak >= LOCK_AT - 1
-                  ? "最后警告：今天 24:00 不确认就会通知紧急联系人。"
+                  ? "最后警告：今天 24:00 不确认即锁死，第一条最终消息在次日 12:00 发出。"
                   : `连续缺席满 ${LOCK_AT} 天，系统向紧急联系人发出最终消息。`}
             </div>
           </div>
@@ -90,8 +90,8 @@ export function DashboardPage(props: {
             <div class="text-body leading-relaxed">
               {o.final_sent_at == null ? (
                 <>
-                  最终消息<span class="text-danger font-semibold">一条都没有送达</span>，系统每天 12:00 自动重试，
-                  直到至少一个「紧急联系人」通道成功。
+                  最终消息<span class="text-danger font-semibold">还没有送达</span>——第一条在锁死后的下一个
+                  12:00 投出，之后每天 12:00 重试，直到至少一个「紧急联系人」通道成功。
                 </>
               ) : o.final_second_at == null ? (
                 <>

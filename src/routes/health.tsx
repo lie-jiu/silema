@@ -41,14 +41,14 @@ export function HealthPage(props: { owner: OwnerRow | null; health: Health; flas
             <Label>任务时间戳</Label>
           </div>
           <Line
-            label="最近发送 · 12:00 链接"
+            label="最近发送 · 12:00（唯一的投递窗口）"
             level={o ? props.health.send.level : "unknown"}
             value={o?.last_send_at == null ? "从未" : `${fmtClock(tz, o.last_send_at)}`}
             meta={o?.last_send_at == null ? "—" : fmtAgo(o.last_send_at, props.now)}
             note={props.health.send.note}
           />
           <Line
-            label="最近判定 · 24:00"
+            label="最近判定 · 24:00（不发任何消息）"
             level={o ? props.health.judge.level : "unknown"}
             value={o ? fmtClock(tz, o.last_judge_at) : "读不到数据"}
             meta={o ? fmtAgo(o.last_judge_at, props.now) : "—"}

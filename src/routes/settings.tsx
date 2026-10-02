@@ -77,7 +77,8 @@ export function SettingsPage(props: {
             <div id="tz-result" class="mt-2 text-label"></div>
             <div class="mt-3">
               <Notice tone="warn" title="改这里不会改提醒时间">
-                签到链接的发送与判定固定为北京 12:00 / 24:00，由部署配置（wrangler.jsonc 的 cron）决定。时区只影响消息与页面里的时间显示。
+                任务时刻固定为北京 12:00 与 24:00，由部署配置（wrangler.jsonc 的 cron）决定：<b>12:00 是唯一的发送窗口</b>，
+                24:00 只做判定并作废当日链接，一条消息都不发。时区只影响消息与页面里的时间显示。
               </Notice>
             </div>
           </form>
