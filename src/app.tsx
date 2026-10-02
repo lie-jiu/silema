@@ -555,10 +555,8 @@ app.post("/api/recipients/fields", async (c) => {
 app.post("/api/recipients", async (c) => {
   const v = await readRecipientForm(c);
   const errors = validateRecipient(v, {}, c.env.SITE_URL);
-  if (errors.length === 0 && !v.onFinal) {
-    const n = await countFinal(c.env.DB);
-    if (n === 0) errors.push("至少需要保留一位紧急联系人");
-  }
+  // 新增不检查「至少一位紧急联系人」：还没有覆盖时无从「保留」覆盖，拦在这里只会让
+  // 大家最先做的一步（给自己加日常提醒通道）做不动。丢掉已有覆盖由更新/删除两条路径拦。
   if (errors.length > 0) {
     return c.html(
       <RecipientEditPage row={null} type={v.channelType} config={v.config} masked={false} values={v} errors={errors} fieldErrors={{}} />,

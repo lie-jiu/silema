@@ -1,7 +1,14 @@
 import { b64url, constantTimeEqual, unb64url } from "./util";
 
 const ENC = new TextEncoder();
-const ITERATIONS = 300_000;
+/**
+ * workd 的 WebCrypto 对 PBKDF2 有硬上限：超过 100000 轮直接抛
+ * `Pbkdf2 failed: iteration counts above 100000 are not supported`。
+ * 本地 miniflare 用的是 Node 的 WebCrypto，没有这个上限，所以只有在真机上才会暴露。
+ * 10 万轮低于 OWASP 对 PBKDF2-SHA256 的当前建议，补偿是这道口令永远不单独生效：
+ * 必须同时有 TOTP（或恢复码），且登录按 IP 限流 10 次/15 分钟。
+ */
+const ITERATIONS = 100_000;
 
 /**
  * `ADMIN_PASSWORD_HASH` 的自描述格式：`pbkdf2$<iterations>$<saltB64>$<hashB64>`。

@@ -129,8 +129,8 @@ function shiftDay(at, days) {
   return q;
 }
 
-// ---- 口令哈希（与 src/lib/password.ts 同格式）----
-const ITERATIONS = 300000;
+// ---- 口令哈希（与 src/lib/password.ts 同格式、同轮数：workd 的 PBKDF2 上限是 100000 轮）----
+const ITERATIONS = 100000;
 
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16);

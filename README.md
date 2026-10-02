@@ -85,40 +85,60 @@ npx wrangler login
 npx wrangler d1 create silema                    # 把返回的 database_id 填进 wrangler.jsonc
 npx wrangler d1 migrations apply silema --remote # 应用 migrations/0001_init.sql
 
-# 生成口令哈希与会话密钥，逐条 wrangler secret put
+# 生成口令哈希与两把随机密钥
 node -e "require('./scripts/_local.cjs').hashPassword(process.argv[1]).then(console.log)" '你的管理员口令'
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-
-npx wrangler secret put ADMIN_USERNAME
-npx wrangler secret put ADMIN_PASSWORD_HASH      # 上面那条命令输出的 pbkdf2$… 整串
-npx wrangler secret put SESSION_SECRET
-npx wrangler secret put CRON_SECRET
-npx wrangler secret put EMAIL_API_KEY            # 用邮件通道才需要
-npx wrangler secret put EMAIL_FROM
-# 可选：npx wrangler secret put HEARTBEAT_SEND_URL / HEARTBEAT_JUDGE_URL
-
-node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP，屏幕上会打印 otpauth:// 二维码内容
-npm run deploy
 ```
+
+把 6 个密钥写进一个 **gitignored** 的 `.secrets.json`（格式同 `wrangler secret bulk`，JSON 或 `.env` 都行）：
+
+```json
+{
+  "ADMIN_USERNAME": "admin",
+  "ADMIN_PASSWORD_HASH": "pbkdf2$100000$…",
+  "SESSION_SECRET": "…32 字节 hex…",
+  "CRON_SECRET": "…32 字节 hex…",
+  "EMAIL_API_KEY": "re_…",
+  "EMAIL_FROM": "silema@mail.liejiu.top"
+}
+```
+
+```bash
+npm run deploy -- --secrets-file .secrets.json   # 代码 + 密钥一次上传，只产生一个版本
+rm .secrets.json                                 # 用完就删；值已经加密存在 Worker 上，读不回来
+
+node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP，屏幕上会打印 otpauth:// 内容
+```
+
+关于密钥的几条官方语义（`workers/configuration/secrets`）：
+
+- `--secrets-file` 里没列出的密钥会**从上一个版本保留**，所以后续只改代码时直接 `npm run deploy` 不会丢密钥；`wrangler deploy` 也永远不会删密钥。
+- 反过来，`vars` 以 `wrangler.jsonc` 为准：**在控制台改过的明文变量会在下次 deploy 时被覆盖**，别在控制台改 `SITE_URL`。
+- 只想改单个密钥用 `npx wrangler secret put <KEY>`——注意它**会立刻创建并部署一个新版本**，6 个密钥逐条 put 就是 6 个版本，所以首次部署走 `--secrets-file`。
+- 还有一个 `secrets.required` 配置项（2026-03-24 新增）能让 deploy 前校验密钥齐不齐。**本仓库刻意不用**：一旦声明，`vite dev` 只会从 `.dev.vars` 加载列在里面的键，`SITE_URL` / `MOCK_SEND` / `DEV_HELPER` 会被排除，本地预览的链接就会指向生产域名。缺密钥时应用本身已经 fail-closed（`/api/auth/*` 与全部需登录接口 503 并列出缺哪几个），够用了。
 
 `init-owner.cjs` 用 `INSERT … ON CONFLICT DO NOTHING`，重跑不会碰业务状态；只有 `--reset-totp` 会换掉密钥、清空恢复码并 bump `session_epoch`。
 
-### 域名切流（这个仓库的地雷）
+### 域名（2026-10-01 实测：全新落地，没有要解绑的东西）
 
-`slm.liejiu.top` 目前绑在**旧版** Worker `si-le-ma`（D1 为 `d1-db`）上，而新版叫 `silema`（D1 也叫 `silema`）——四个名字全不一样，部署只会新建、不会覆盖。切流量要**先把 custom domain 从旧 Worker 解绑，再绑到新 Worker**，否则冲突：
+账号里现在**既没有旧版 Worker `si-le-ma`、也没有 `silema`，没有 D1 `silema`，zone `liejiu.top` 里也没有任何 `slm` 记录**——`slm.liejiu.top` 目前是空的。所以不存在「先解绑再绑」的冲突，加上 `routes` 就行：
 
 ```jsonc
 // wrangler.jsonc
 "routes": [{ "pattern": "slm.liejiu.top", "custom_domain": true }]
 ```
 
-重写**不迁移任何旧数据**，旧库的签到日历与投递历史明知会丢。旧通道凭据与文案已备份在仓库外（见 `docs/backend.md` §4 的字段映射说明）。
+`custom_domain` 由 Cloudflare 自动创建那条 `AAAA 100::` 记录并签发证书（zone 里 `dav` / `60s` / `sub` 三个都是这么来的），**不需要 DNS 写权限，需要的是 `Workers Routes: Write`**（官方授权文档：加/改/删 Route 与 Custom Domain 要 Worker 的 Editor + 每个受影响 zone 的 Workers Routes Write）。不加 `routes` 的话只有 `silema.liejiunb666.workers.dev` 可用，此时 `vars.SITE_URL` 必须跟着改成实际对外地址，否则消息里的签到链接指向错的域。
+
+> Custom Domain **不能建在已有 CNAME 记录的主机名上**。`slm` 目前没有任何记录，所以不冲突。
+
+遗留资产：旧库 D1 `d1-db`（id `d95e62c2-2d62-4a15-9f46-5b2026070421`）还在账号里，确认新版跑通后可以自行清理。邮件通道的 Resend DKIM（`resend._domainkey.mail.liejiu.top`）已经在 zone 里，所以 `EMAIL_FROM` 用 `…@mail.liejiu.top` 不需要再加 DNS。
 
 ---
 
 ## 环境变量
 
-Secret 用 `wrangler secret put`，本地放 `.dev.vars`（已 gitignore，`db:seed` 会自动生成）。
+Secret 首次部署用 `wrangler deploy --secrets-file`（见上），之后改单个用 `wrangler secret put`；本地放 `.dev.vars`（已 gitignore，`db:seed` 会自动生成）。
 
 | 名称 | 必需 | 缺失后果 |
 |---|---|---|
@@ -132,7 +152,7 @@ Secret 用 `wrangler secret put`，本地放 `.dev.vars`（已 gitignore，`db:s
 | `MOCK_SEND` | — | `1` = 所有发送只记录不触网，仅限本地 |
 | `DEV_HELPER` | — | `1` = 开启 `/dev/totp` 与 `/dev/outbox`，**生产绝对不要设** |
 
-口令哈希用 **WebCrypto PBKDF2-SHA256（300k 轮）**而不是 bcrypt/argon2id：Workers 没有原生实现，纯 JS 的 bcrypt 会打爆 CPU 配额。格式自带算法与轮数前缀，将来换 argon2id（WASM）不用改调用方。
+口令哈希用 **WebCrypto PBKDF2-SHA256（100k 轮）**而不是 bcrypt/argon2id：Workers 没有原生实现，纯 JS 的 bcrypt 会打爆 CPU 配额。**10 万轮是 workerd 的硬上限**，超过就直接抛 `iteration counts above 100000 are not supported`——本地 miniflare 用的是 Node 的 WebCrypto 没有这个限制，所以这个雷只在真机上炸。10 万轮低于 OWASP 当前建议，补偿是这道口令从不单独生效：必须同时有 TOTP（或恢复码），且登录按 IP 限流 10 次/15 分钟。格式自带算法与轮数前缀，所以将来换 argon2id（WASM）或平台放宽上限都不用改调用方。
 
 ---
 

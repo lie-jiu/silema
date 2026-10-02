@@ -62,10 +62,14 @@ export function RecipientsPage(props: {
       }
     >
       <div class="p-4 flex flex-col gap-3">
-        <Notice tone={finalCount <= 1 ? "warn" : "neutral"}>
+        <Notice tone={finalCount === 0 ? "danger" : finalCount === 1 ? "warn" : "neutral"}>
           紧急联系人 <b class="tabular-nums">{finalCount}</b> 人 · 日常提醒{" "}
           <b class="tabular-nums">{promptCount}</b> 人
-          {finalCount <= 1 ? "：只剩 1 位紧急联系人，删除后将无法保存。" : ""}
+          {finalCount === 0
+            ? "：还没有紧急联系人，锁死时不会有任何人收到最终消息 —— 这套开关目前等于没有兜底。"
+            : finalCount === 1
+              ? "：只剩 1 位紧急联系人，删除或退订前需要先指定另一位。"
+              : ""}
         </Notice>
 
         {props.rows.length === 0 ? (

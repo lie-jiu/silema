@@ -139,8 +139,10 @@ export function DashboardPage(props: {
           <div class="row">
             <span class="flex-1">
               <span class="block text-body font-semibold">通道</span>
-              <span class="block text-label opacity-55 mt-0.5">
-                日常提醒 {props.recipientCounts.prompt} · 紧急联系人 {props.recipientCounts.final}
+              <span class={`block text-label mt-0.5 ${props.recipientCounts.final === 0 ? "text-danger" : "opacity-55"}`}>
+                {props.recipientCounts.final === 0
+                  ? "还没有紧急联系人 · 锁死时没有人会收到最终消息"
+                  : `日常提醒 ${props.recipientCounts.prompt} · 紧急联系人 ${props.recipientCounts.final}`}
               </span>
             </span>
             <a href="/admin/recipients" class="btn btn-flat h-9 px-3 text-label">

@@ -17,7 +17,10 @@ export function securityHeaders(c: Context, extra: Record<string, string> = {}):
       "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
   c.header("X-Content-Type-Options", "nosniff");
-  c.header("Referrer-Policy", "no-referrer");
+  // 不用 no-referrer：那会把 csrfGuard 的 Referer 兜底整个抹掉（Origin 在 iOS WebKit 的同源表单 POST 上也不发）。
+  // strict-origin-when-cross-origin 是各浏览器的默认值：跨站只带站点根、**路径永远不外泄**，
+  // 所以签到链接里的令牌不会跟着 Referer 出去；只有同源请求带完整 URL，而那是发给我们自己的。
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   c.header("X-Frame-Options", "DENY");
   for (const [k, v] of Object.entries(extra)) c.header(k, v);
 }
@@ -33,11 +36,16 @@ function sameOrigin(c: Context): boolean {
 }
 
 /**
- * CSRF：cookie 是 SameSite=Lax（跨站 POST 不带 cookie）+ 状态变更只接受 POST +
- * 校验 `HX-Request` 头（htmx 自动带，跨站 HTML 表单无法设置自定义头）。
- * 无 htmx 的降级提交用同源 Origin/Referer 兜底（docs/backend.md §7）。
+ * CSRF：cookie 是 SameSite=Lax（跨站 POST 根本不带 cookie），再叠一层「这个请求确实来自本站」的判定。
+ *
+ * 判定按可靠性从高到低取任一成立即可：
+ * 1. `Sec-Fetch-Site: same-origin` —— 浏览器给真实发起的导航/请求打的标，跨站表单永远拿不到 same-origin。
+ * 2. `HX-Request` —— htmx 自动带，跨站 HTML 表单无法设置自定义头。
+ * 3. `Origin` 同源 —— **iOS WebKit（含微信内置浏览器）对同源的表单导航 POST 不发 Origin**，不能只靠它。
+ * 4. `Referer` 同源 —— 只有在 Referrer-Policy 允许同源带路径时才有值（见 securityHeaders）。
  */
 export function csrfGuard(c: Context): string | null {
+  if (c.req.header("Sec-Fetch-Site") === "same-origin") return null;
   if (c.req.header("HX-Request") === "true") return null;
   if (sameOrigin(c)) return null;
   return "请求缺少同源校验，请刷新页面后重试";

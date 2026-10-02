@@ -11,9 +11,13 @@
     {
       "binding": "DB",
       "database_name": "silema",
-      "database_id": "silema-local",
+      "database_id": "aca7c6c0-d026-4fdb-9983-2b913b6e77b6",
       "migrations_dir": "migrations"
     }
+  ],
+  "routes": [
+    // Cloudflare 自动建 AAAA 100:: 记录并签证书；需要的是 Workers Routes Write，不是 DNS 写权限
+    { "pattern": "slm.liejiu.top", "custom_domain": true }
   ],
   "triggers": {
     // 北京 12:00 发送 / 北京 24:00 判定（cron 表达式为 UTC）
