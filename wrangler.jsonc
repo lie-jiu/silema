@@ -7,6 +7,12 @@
   "observability": {
     "enabled": true
   },
+  // 边缘缓存在 Worker 执行之前先查，命中就不跑 isolate。默认是关的；开启后**任何** 200 的 GET
+  // 即使不带 Cache-Control 也会被缓存 2 小时，所以 app.tsx 的全局中间件先把所有响应压成
+  // no-store，只有内容寻址过的 /assets/* 显式放行 immutable。加新路由时别忘了这个前提。
+  "cache": {
+    "enabled": true
+  },
   "d1_databases": [
     {
       "binding": "DB",

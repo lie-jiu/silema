@@ -23,7 +23,7 @@ export function CheckinPage(props: StageProps): ReturnType<FC> {
   const stage = <div id="checkin-stage" class="contents">{Stage(props)}</div>;
   if (props.fragment) return stage;
   return (
-    <Shell title="死了吗 · 每日确认" shell="public" htmx noStore scripts={["/assets/hold-button.js"]}>
+    <Shell title="死了吗 · 每日确认" shell="public" htmx scripts={["/assets/hold-button.js"]}>
       {stage}
     </Shell>
   );

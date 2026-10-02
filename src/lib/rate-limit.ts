@@ -6,7 +6,9 @@ export async function hitRateLimit(
   windowMs: number,
   now = Date.now(),
 ): Promise<{ allowed: boolean; count: number; retryAfterMinutes: number }> {
-  await db.batch([
+  // upsert 与回读必须在同一个 batch 里：batch 是一个隐式事务，回读看得到刚写下的计数，
+  // 而拆成两次往返会在这个全站最热的路径（打开签到链接）上白付一次 D1 round-trip。
+  const [, read] = await db.batch<{ count: number; window_start: number }>([
     db
       .prepare(
         `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
@@ -18,10 +20,7 @@ export async function hitRateLimit(
     db.prepare("SELECT count, window_start FROM rate_limits WHERE key = ?").bind(key),
   ]);
 
-  const row = await db.prepare("SELECT count, window_start FROM rate_limits WHERE key = ?").bind(key).first<{
-    count: number;
-    window_start: number;
-  }>();
+  const row = read?.results?.[0];
   const count = row?.count ?? 1;
   const elapsed = now - (row?.window_start ?? now);
   const retryAfter = Math.max(1, Math.ceil((windowMs - elapsed) / 60_000));

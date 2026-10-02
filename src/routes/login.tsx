@@ -112,7 +112,7 @@ export function LoginPage(props: {
 
   if (props.fragment) return form;
   return (
-    <Shell title="登录 · 死了吗" shell="admin" htmx noStore bare scripts={["/assets/dialog.js"]}>
+    <Shell title="登录 · 死了吗" shell="admin" htmx bare scripts={["/assets/dialog.js"]}>
       {form}
     </Shell>
   );

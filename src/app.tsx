@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Context } from "hono";
 
-import { performCheckin, resolveView, type CheckinView } from "./lib/checkin";
+import { performCheckin, resolveView, viewOf, type CheckinView } from "./lib/checkin";
 import { isChannelType, mergeConfig, unsafeWebhookUrl, validateConfig, type ChannelType } from "./lib/channels";
 import { configsDiffer, notifyContactChange, targetBrief, type NoticeOutcome } from "./lib/contact-change";
 import { runJudge, runSend } from "./lib/cron";
@@ -45,6 +45,11 @@ const clientIp = (c: { req: { header: (n: string) => string | undefined } }) =>
 
 app.use("*", async (c, next) => {
   securityHeaders(c);
+  // 开了 Workers Cache 之后，200 的 GET 响应**即使不带 Cache-Control 也会被边缘缓存 2 小时**，
+  // 而绕过条件只认 Set-Cookie 响应头和 Authorization 请求头——Cookie 不算。也就是说 /admin 和
+  // /c/:token 都会被缓存住再原样吐给任何请求同一 URL 的人。所以这里默认全站 no-store，
+  // 唯一放行长缓存的是内容寻址过的 /assets/*（见下）。
+  c.header("Cache-Control", "no-store");
   await next();
 });
 
@@ -58,7 +63,12 @@ const JS: Record<string, string> = {
 app.get("/assets/:name", (c) => {
   const body = JS[c.req.param("name") ?? ""];
   if (!body) return c.notFound();
-  return c.body(body, 200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" });
+  // URL 上带内容哈希（shell.tsx 的 versioned），内容一变 URL 就变，所以可以 immutable 一年：
+  // 签到链接是每天才打开一次的，缓存期短于这个间隔等于每天重下一遍 52KB 的 htmx。
+  return c.body(body, 200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "public, max-age=31536000, immutable",
+  });
 });
 
 // ---- 公共：状态与签到 ----
@@ -137,6 +147,7 @@ app.post("/c/:token/do", async (c) => {
     return respond(
       c,
       {
+        view,
         error:
           view.owner.state === "locked"
             ? "系统已锁死，锁定期不再发出任何链接，而这条恢复链接已经过期"
@@ -146,11 +157,9 @@ app.post("/c/:token/do", async (c) => {
       raw,
     );
   }
-  if (res.kind === "test") {
-    const view = await resolveView(c.env.DB, raw, now);
-    return respond(c, { view, test: true }, now, raw);
-  }
-  const view = await resolveView(c.env.DB, raw, now);
+  // performCheckin 交回来的就是签到后的 owner 与已消费的令牌，渲染同一页不必再查一次库
+  const view = viewOf(res.token, res.owner, now);
+  if (res.kind === "test") return respond(c, { view, test: true }, now, raw);
   return respond(c, { view, done: { streak: res.streak, wasLocked: res.wasLocked } }, now, raw);
 });
 
@@ -368,7 +377,8 @@ app.use("/admin/*", async (c, next) => {
 
 async function renderDashboard(c: Context<{ Bindings: Bindings; Variables: Variables }>, flashKey?: string) {
   const now = Date.now();
-  const o = await getOwner(c.env.DB);
+  // requireAuth 已经读过 owner 并挂进 context，这里再查一次是白花一个往返
+  const o = c.get("owner");
   const health = healthOf(o, now);
   const rows = await listRecipients(c.env.DB);
   return (
@@ -409,9 +419,9 @@ const NOTICE_TEXT: Record<string, { tone: "ok" | "warn"; text: string }> = {
 
 app.get("/admin", async (c) => c.html(await renderDashboard(c, c.req.query("flash"))));
 
-app.get("/admin/health", async (c) => {
+app.get("/admin/health", (c) => {
   const now = Date.now();
-  const o = await getOwner(c.env.DB);
+  const o = c.get("owner");
   return c.html(<HealthPage owner={o} health={healthOf(o, now)} flash={flashOf(c)} now={now} />);
 });
 
@@ -455,8 +465,7 @@ app.post("/api/settings", async (c) => {
 
 app.post("/api/cron/resend", async (c) => {
   // 锁死后这个动作的语义不成立：locked 态的 runSend 发的是第二条最终消息，不是当日链接。
-  const o = await getOwner(c.env.DB);
-  if (o?.state === "locked") return c.text("已锁死，锁定期不重发日常链接", 409);
+  if (c.get("owner").state === "locked") return c.text("已锁死，锁定期不重发日常链接", 409);
   const res = await runSend(c.env, { force: true });
   if (!res.ran) return c.text(res.skipped ?? "未执行", 409);
   if (res.error) return c.text(res.detail, 502);

@@ -5,6 +5,12 @@ import styleText from "../styles.css?inline";
 
 export type Tab = "dashboard" | "recipients" | "settings";
 
+/**
+ * 静态脚本一律带内容哈希版本号，配合 `/assets/:name` 的 `immutable` 一年缓存：
+ * 签到链接是每天打开一次的，而原先的 `max-age=3600` 短于这个间隔，等于每次都要重下 52KB 的 htmx。
+ */
+const versioned = (src: string) => `${src}?v=${__ASSET_VERSION__}`;
+
 const HREFS: Record<Tab, string> = {
   dashboard: "/admin",
   recipients: "/admin/recipients",
@@ -69,7 +75,6 @@ export function Shell(props: {
   navTitle?: string;
   backHref?: string;
   flash?: Flash;
-  noStore?: boolean;
   htmx?: boolean;
   /** 不渲染后台顶栏：登录这类自带品牌块的单屏页，顶栏只会多出一条无意义的色带 */
   bare?: boolean;
@@ -90,11 +95,10 @@ export function Shell(props: {
         <title>{title}</title>
         <meta name="theme-color" content="#070b12" />
         <meta name="format-detection" content="telephone=no" />
-        {props.noStore ? <meta http-equiv="Cache-Control" content="no-store" /> : null}
         <style>{raw(styleText)}</style>
-        {props.htmx ? <script src="/assets/htmx.min.js" defer /> : null}
+        {props.htmx ? <script src={versioned("/assets/htmx.min.js")} defer /> : null}
         {(props.scripts ?? []).map((src) => (
-          <script key={src} type="module" src={src} />
+          <script key={src} type="module" src={versioned(src)} />
         ))}
       </head>
       <body>
