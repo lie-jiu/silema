@@ -31,10 +31,7 @@
 
 **所有消息只在每天 12:00 发**（24:00 你在睡觉），每天严格一条；24:00 只做判定与作废当日链接，一条都不发。连续缺席到第 3 天判定为锁死，紧急联系人次日 12:00 收到预设的最终消息，再次日 12:00 收到最后一条，之后**彻底静默**。只有 owner 再次签到才能恢复。
 
-规格文档：
-
-- [`docs/backend.md`](docs/backend.md) — 状态机、两条 cron、API 表、完整 DDL
-- [`docs/mobile-ui.md`](docs/mobile-ui.md) — 4 flows / 13 屏的 SSR 规格与「维生监护仪 · 夜视」视觉系统
+本文自带全部规格：状态机与两条 cron 见[它每天怎么运转](#它每天怎么运转)，接口面见[端点](#端点)，schema 见[数据模型](#数据模型)，安全约定见[安全](#安全)，边界与代价见[使用前必须知道的边界](#使用前必须知道的边界)与[已知取舍](#已知取舍)。
 
 ## 它每天怎么运转
 
@@ -140,7 +137,7 @@
 | 部署 | wrangler + `wrangler.jsonc` | 4.145.0 | D1 绑定 / custom_domain / 两条 cron / vars |
 | 测试 | Vitest | 5.0.3 | 已接线但**当前跑不起来**，见[开发与构建](#开发与构建) |
 
-不用 ORM（签到 UPDATE 依赖 SQLite 的 `CASE` 与「右侧表达式取旧值」语义，query builder 表达不了）、不用 SPA（签到页必须首屏即终态、无 JS 也能读懂，它可能在别人的手机上被打开）、不用 better-auth（D1 上只能走 drizzleAdapter，会连带引入 Drizzle 与 8 张表）。理由都写在 `docs/backend.md` §0。
+不用 ORM（签到 UPDATE 依赖 SQLite 的 `CASE` 与「右侧表达式取旧值」语义，query builder 表达不了）、不用 SPA（签到页必须首屏即终态、无 JS 也能读懂，它可能在别人的手机上被打开）、不用 better-auth（D1 上只能走 drizzleAdapter，会连带引入 Drizzle 与 8 张表）。选型备注见上方表格。
 
 ---
 
@@ -152,13 +149,12 @@ silema/
 │   ├── index.tsx       # Worker 入口：fetch + scheduled（cron 表达式精确映射到 send / judge）
 │   ├── app.tsx         # 全部路由：公共页 / 签到 / 认证 / 后台，SSR + htmx
 │   ├── lib/            # 18 个无 UI 模块：cron · checkin · tokens · channels · send · messages …
-│   ├── routes/         # 6 个页面组件（规格里的 13 屏分布在其中）
+│   ├── routes/         # 6 个页面组件（13 屏界面分布在其中）
 │   ├── ui/             # kit.tsx（Panel / Field / Switch / ConfirmDialog / Notice …）· shell.tsx
 │   ├── client/         # 3 个 type=module 小文件：hold-button · dialog · chips
 │   └── styles.css      # Tailwind v4 @theme +「维生监护仪 · 夜视」组件层 + 全站纯 CSS 动效
 ├── scripts/            # seed-local · migrate · init-owner · hash-password(.cjs/.ps1) · _local
 ├── migrations/         # 0001_init.sql（4 张表）+ 0002_final_second_message.sql
-├── docs/               # backend.md（状态机 / cron / API / DDL）· mobile-ui.md（13 屏规格）
 └── wrangler.jsonc      # D1 绑定 · custom_domain · 两条 cron · vars · Workers Cache
 ```
 
@@ -219,9 +215,6 @@ silema/
 ├── migrations/
 │   ├── 0001_init.sql       # owner / checkin_tokens / recipients / rate_limits
 │   └── 0002_final_second_message.sql  # owner.final_second_at
-├── docs/
-│   ├── backend.md          # 设计定稿：技术栈选型理由、状态机、两条 cron、链接生命周期、API、DDL、安全要点
-│   └── mobile-ui.md        # H5 规格：导航架构、视觉规范、手势、每屏五态矩阵、13 屏逐屏规格、文案总表
 ├── wrangler.jsonc          # name / main / compatibility_date / nodejs_compat / observability /
 │                           #   cache.enabled / D1 绑定 / custom_domain route / 两条 cron / vars
 └── vite.config.ts          # cloudflare() + tailwindcss()、@ 别名、__ASSET_VERSION__ 内容哈希
@@ -229,7 +222,7 @@ silema/
 
 </details>
 
-安全相关的几条硬约定（改代码前先读 `docs/backend.md` §7）：
+安全相关的几条硬约定：
 
 - CSP `script-src 'self'`，所以 htmx **不用 `hx-on` 内联属性**，需要脚本的地方写成同源 `type="module"` 小文件。
 - Hono JSX 会转义 `<style>` 子节点，注入内联 CSS 必须 `<style>{raw(css)}</style>`（`raw` 从 `hono/utils/html` 导入，`hono/jsx` 不导出它）。

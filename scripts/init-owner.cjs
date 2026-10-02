@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 "use strict";
-// owner 行初始化 / TOTP 重置（docs/backend.md §4、§5）。
+// owner 行初始化 / TOTP 重置（README「数据模型」与「部署到 Cloudflare」）。
 //   node scripts/init-owner.cjs [--local|--remote] [--reset-totp]
 // 任何模式都不碰业务状态；--reset-totp 只覆盖 totp_secret / totp_last_step、清空 backup_codes 并 bump session_epoch。
 const { runSql, query, sqlStr, sqlNum, randomBase32 } = require("./_local.cjs");

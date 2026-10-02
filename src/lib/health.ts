@@ -16,7 +16,7 @@ const JUDGE_LIMIT_H = 25;
 
 /**
  * 后台健康判定不读 `last_cron_*`——那个槽位只有一份，judge 记的 error 会被 12 小时后一次
- * 正常的 send 覆盖。健康直接看时间戳（docs/backend.md §7）。
+ * 正常的 send 覆盖。健康直接看时间戳（README「自监控与运维」）。
  *
  * 假阴性红线：取不到数据时返回 unknown 并由 UI 标红，绝不默认绿。
  */

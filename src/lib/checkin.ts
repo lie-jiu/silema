@@ -2,7 +2,7 @@ import { writeWithRetry, type OwnerRow } from "./db";
 import { findToken, isLive, type TokenRow } from "./tokens";
 
 /**
- * 签到确认页三态（docs/backend.md §2.3）：
+ * 签到确认页三态（README「签到与状态机」）：
  * 「已使用」= 本周期已经记到一次确认，系统是安全的，不给补救入口；
  * 「已失效」= 当天无从签到，必须给后台入口。两者绝不能共用一句文案。
  */
@@ -42,7 +42,7 @@ export type CheckinResult =
   | { ok: false; reason: "used" | "invalid" };
 
 /**
- * 全站唯一的签到入口，只由 `POST /c/:token/do` 调用——不存在后台签到接口（docs/backend.md §3）。
+ * 全站唯一的签到入口，只由 `POST /c/:token/do` 调用——不存在后台签到接口（README「使用前必须知道的边界」）。
  *
  * 一个 batch 里四条语句：锁死前的状态快照、条件消费令牌、条件更新 owner、签到后的新状态。
  * batch 中途无法在 JS 里读值分支，而 SQLite 的 UPDATE 右侧表达式一律取旧值，所以

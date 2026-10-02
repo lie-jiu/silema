@@ -1,4 +1,4 @@
-/** 按 IP 的固定窗口限流，存 D1（docs/backend.md §7）。 */
+/** 按 IP 的固定窗口限流，存 D1（限额见 README「安全」与「环境变量」）。 */
 export async function hitRateLimit(
   db: D1Database,
   key: string,

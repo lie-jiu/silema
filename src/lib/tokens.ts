@@ -41,7 +41,7 @@ export async function findToken(db: D1Database, token: string): Promise<TokenRow
 
 /**
  * 12:00 清链 + 铸造当日令牌。`purpose != 'test'` 全删（含已使用，不留审计），
- * 到期时刻取固定墙钟当日 24:00——不用 created_at+12h，cron 晚触发时两者会分叉（docs/backend.md §2.1）。
+ * 到期时刻取固定墙钟当日 24:00——不用 created_at+12h，cron 晚触发时两者会分叉（README「签到与状态机」）。
  */
 export async function rollDailyPrompt(db: D1Database, now = Date.now()): Promise<TokenRow> {
   const token = randomHex(32);
@@ -61,7 +61,7 @@ export async function rollDailyPrompt(db: D1Database, now = Date.now()): Promise
 
 /**
  * 重发用的当日令牌：`/api/cron/resend` 与 `/__cron?force=1` 复用这条，不重新清链
- * （docs/backend.md §2.1 步 4、§7；README「重发的仍是同一条当日令牌」）——
+ * （README「使用前必须知道的边界」）——
  * 清链会让已经送达的消息里那条链接当场变「已失效」，而重发本是「链接没送到」的补救手段。
  * 刻意不过滤 `used_at`：今天已签过再重发，接收人看到「今日已签」才是事实。
  */
@@ -84,7 +84,7 @@ export async function voidDayLinks(db: D1Database, now = Date.now()): Promise<vo
   );
 }
 
-/** 恢复链接 TTL 7 天；锁死期间逐日复用未过期那条（docs/backend.md §2.2）。 */
+/** 恢复链接 TTL 7 天；锁死期间逐日复用未过期那条（README「它每天怎么运转」）。 */
 export async function ensureRecoveryToken(db: D1Database, now = Date.now()): Promise<string> {
   const live = await db
     .prepare("SELECT * FROM checkin_tokens WHERE purpose = 'final' AND used_at IS NULL AND expires_at > ?")

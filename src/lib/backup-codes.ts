@@ -6,7 +6,7 @@ export function formatCode(raw: string): string {
   return `${raw.slice(0, 5)}-${raw.slice(5)}`;
 }
 
-/** 10 个一次性恢复码；明文只在生成那次响应里出现，库里只存哈希（docs/backend.md §5）。 */
+/** 10 个一次性恢复码；明文只在生成那次响应里出现，库里只存哈希（README「端点 · 认证」）。 */
 export function generateBackupCodes(): string[] {
   return Array.from({ length: 10 }, () =>
     formatCode(

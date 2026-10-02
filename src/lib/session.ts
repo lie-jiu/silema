@@ -26,7 +26,7 @@ export async function issueSession(
   return { value: `${body}.${await hmac(secret, body)}`, maxAge: SESSION_TTL_MS / 1000 };
 }
 
-/** 只验签与验期；`session_epoch` 必须再由调用方比对 owner 行（docs/backend.md §5）。 */
+/** 只验签与验期；`session_epoch` 必须再由调用方比对 owner 行（README「端点 · 认证」）。 */
 export async function readSession(
   secret: string,
   value: string | undefined,

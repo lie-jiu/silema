@@ -49,7 +49,7 @@ async function recordJudge(db: D1Database, now: number): Promise<void> {
 /**
  * 并发保护：判定写入一律带 `WHERE last_checkin_at IS NULL OR last_checkin_at < :windowStart`。
  * affected rows = 0 说明期间发生了签到，整体放弃本次判定、不发任何消息——否则午夜前后的点击
- * 会被随后落库的判定覆盖成 locked，而最终消息不可撤回（docs/backend.md §2.2 step 6）。
+ * 会被随后落库的判定覆盖成 locked，而最终消息不可撤回（README「它每天怎么运转」）。
  */
 async function conditionalUpdate(db: D1Database, sql: string, params: unknown[], windowStart: number) {
   return writeWithRetry("判定写入", () =>
@@ -129,7 +129,7 @@ async function deliverFinal(
  * 心跳监控的是「调度器有没有跑到这一步」，不是「消息有没有发出去」。
  * 所以按设计跳过的路径（locked 不发日常链接、12h 幂等守卫、两条最终消息已发满的静默期）同样要喂狗——
  * 否则一次锁死会让两个 check 在整个期间天天误报，而告警接收方是紧急联系人。
- * 两个 job 各一个独立 check URL（docs/backend.md §7）。
+ * 两个 job 各一个独立 check URL（README「自监控与运维」）。
  */
 export async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void> {
   const base = job === "send" ? env.HEARTBEAT_SEND_URL : env.HEARTBEAT_JUDGE_URL;
@@ -143,7 +143,7 @@ export async function ping(env: Env, job: "send" | "judge", ok: boolean): Promis
 }
 
 /**
- * 12:00 发送任务（docs/backend.md §2.1）：全站唯一的对外投递窗口。
+ * 12:00 发送任务（README「它每天怎么运转」）：全站唯一的对外投递窗口。
  * normal 态每天**只发一条**——缺席时同一条消息自动升级为「未确认提醒」文案，用的还是当日这条链接；
  * locked 态负责最多两条最终消息。24:00 的判定任务不发任何东西。
  */
@@ -294,7 +294,7 @@ async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise
 }
 
 /**
- * 24:00 判定任务（docs/backend.md §2.2）：**只判定，一条消息都不发**——缺席计数、锁死与作废
+ * 24:00 判定任务（README「它每天怎么运转」）：**只判定，一条消息都不发**——缺席计数、锁死与作废
  * 当日链接都在这里完成，投递全部归 12:00 的 send。
  */
 export async function runJudge(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<CronSummary> {

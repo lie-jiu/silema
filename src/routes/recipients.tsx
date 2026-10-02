@@ -124,7 +124,7 @@ export function RecipientsPage(props: {
           </ul>
         )}
 
-        {/* 左滑删除降级为行内删除按钮 + <dialog>：不为手势牺牲可用性（docs/mobile-ui.md §1.5） */}
+        {/* 左滑删除降级为行内删除按钮 + <dialog>：不为手势牺牲可用性 */}
         {props.rows.map((row) => (
           <ConfirmDialog
             key={row.id}
@@ -336,7 +336,7 @@ export function RecipientEditPage(props: {
           ) : null}
         </div>
 
-        {/* 长表单：主按钮吸底但不跟随键盘上移（docs/mobile-ui.md §1.4） */}
+        {/* 长表单：主按钮吸底但不跟随键盘上移 */}
         <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] px-4 py-3 pb-safe bg-canvas/88 backdrop-blur-xl border-t border-ink/8 flex gap-2.5">
           <a href="/admin/recipients" class="btn btn-flat flex-1">
             取消

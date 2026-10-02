@@ -45,7 +45,7 @@ export type Rendered = { title: string; body: string };
 
 /**
  * 首行 = 标题。`{checkin_url}` 取不到时返回 null 而不是回退站点地址——
- * 回退等于让接收人收到一条看着正常、点了没反应的链接，静默制造缺席（docs/backend.md §6）。
+ * 回退等于让接收人收到一条看着正常、点了没反应的链接，静默制造缺席（README「通知通道」）。
  */
 export function render(
   template: string | null | undefined,

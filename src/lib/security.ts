@@ -6,7 +6,7 @@ import { getCookie } from "hono/cookie";
 import { readSession, SESSION_COOKIE } from "./session";
 import type { Env } from "./send";
 
-/** 三者任一缺失 → 一律 503，绝不放行（docs/backend.md §5）。 */
+/** 三者任一缺失 → 一律 503，绝不放行（README「环境变量」）。 */
 export function missingSecrets(env: Env): string[] {
   return ["ADMIN_USERNAME", "ADMIN_PASSWORD_HASH", "SESSION_SECRET"].filter((k) => !env[k as keyof Env]);
 }
@@ -55,7 +55,7 @@ export function csrfGuard(c: Context): string | null {
 export type AuthedContext = { owner: OwnerRow };
 
 /**
- * 会话失效统一拦截（docs/mobile-ui.md §3 Screen 3）：页面请求 302 到登录页，
+ * 会话失效统一拦截（README「端点 · 认证」）：页面请求 302 到登录页，
  * htmx 片段请求回 `HX-Redirect` 头——返回 401 JSON 的话 htmx 会静默忽略，
  * 用户看到的是「点了没反应」，内容永远不更新。
  */

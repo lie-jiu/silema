@@ -291,7 +291,7 @@ export function Switch(props: { name: string; checked: boolean; label: string; d
 /**
  * 原生 `<dialog>`：自带 backdrop、Esc 关闭、focus trap，零依赖。
  * 带 `post` 的确认按钮走 `data-post-confirm`，由 `/assets/dialog.js` 发 POST 后关闭并跳转——
- * 不用内联 onclick，为了守住 CSP `script-src 'self'`（docs/backend.md §7）。
+ * 不用内联 onclick，为了守住 CSP `script-src 'self'`（README「安全」）。
  */
 export function ConfirmDialog(props: {
   id: string;

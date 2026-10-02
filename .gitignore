@@ -8,3 +8,7 @@ dist/
 .secrets.json
 *.log
 .DS_Store
+
+# 内部设计规格（backend.md / mobile-ui.md）：本地私有，不随仓库发布
+# 历史已从全部 commit 中抹除，见 2026-10-02 的 filter-repo 操作
+docs/

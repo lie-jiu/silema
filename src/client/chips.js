@@ -1,4 +1,4 @@
-// 占位符 chip → 插入到当前聚焦 / 最后一个 textarea 的光标处（docs/mobile-ui.md §4 Screen 2）。
+// 占位符 chip → 插入到当前聚焦 / 最后一个 textarea 的光标处。
 document.addEventListener("click", (e) => {
   const chip = e.target instanceof Element ? e.target.closest("[data-chip]") : null;
   if (!chip) return;

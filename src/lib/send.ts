@@ -8,7 +8,7 @@ export type Env = {
   ADMIN_PASSWORD_HASH?: string;
   SESSION_SECRET?: string;
   CRON_SECRET?: string;
-  /** 外部心跳：按 job 两个独立 check，共用一个会让 send 每天喂狗、judge 静默不跑也不告警（docs/backend.md §7） */
+  /** 外部心跳：按 job 两个独立 check，共用一个会让 send 每天喂狗、judge 静默不跑也不告警（README「自监控与运维」） */
   HEARTBEAT_SEND_URL?: string;
   HEARTBEAT_JUDGE_URL?: string;
   DEV_HELPER?: string;
@@ -34,7 +34,7 @@ export function isMock(env: Env): boolean {
 const CHANNEL_TIMEOUT_MS = 5_000;
 const RETRIES = 3;
 
-/** 单通道调用内即时重试 ≤3 次（docs/backend.md §2.1）；时间预算由调用方的 allSettled 控制。 */
+/** 单通道调用内即时重试 ≤3 次（README「环境变量」的阈值表）；时间预算由调用方的 allSettled 控制。 */
 export async function deliverWithRetry(
   env: Env,
   type: ChannelType,

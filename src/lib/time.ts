@@ -1,4 +1,4 @@
-/** 任务时刻的墙钟基准：cron 固定在 UTC 04/16，即北京 12:00 / 24:00（docs/backend.md §2）。 */
+/** 任务时刻的墙钟基准：cron 固定在 UTC 04/16，即北京 12:00 / 24:00（README「它每天怎么运转」）。 */
 export const SCHEDULE_TZ = "Asia/Shanghai";
 
 const partsCache = new Map<string, Intl.DateTimeFormat>();

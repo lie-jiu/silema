@@ -1,4 +1,4 @@
-// 长按签到大圆：全站唯一签到入口的防误触 + 进度反馈（docs/mobile-ui.md §2 Screen 1）。
+// 长按签到大圆：全站唯一签到入口的防误触 + 进度反馈。
 // 满 0.6s 才派发 "hold" 事件，由 htmx 的 hx-trigger="hold" 发 POST；未满松手回弹且不发请求。
 const HOLD_MS = 600;
 const ROLLBACK_MS = 200;

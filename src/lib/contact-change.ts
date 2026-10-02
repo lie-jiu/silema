@@ -27,7 +27,7 @@ export function configsDiffer(prevJson: string, nextJson: string): boolean {
 }
 
 /**
- * 紧急联系人名单变更告知（docs/backend.md §5）。
+ * 紧急联系人名单变更告知（README「通知通道」）。
  *
  * 只发给**变更前**的 on_final 名单、且用各自的**旧配置**投递：被移除那位本人正是最需要知道的人，
  * 而被改过通道那位也只有旧配置才指向真实的人——账号被盗的第一步就是悄悄换掉联系人，

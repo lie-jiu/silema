@@ -77,7 +77,7 @@ export function secretKeys(type: ChannelType): string[] {
   return CHANNELS[type].fields.filter((f) => f.secret).map((f) => f.key);
 }
 
-/** 掩码只保留末 4 位；这个串同时是「保持原值」的哨兵（docs/backend.md §5）。 */
+/** 掩码只保留末 4 位；这个串同时是「保持原值」的哨兵（README「端点 · 需登录」）。 */
 export function maskValue(value: string): string {
   if (!value) return "";
   const tail = value.slice(-4);
@@ -128,7 +128,7 @@ export function validateConfig(type: ChannelType, config: Record<string, unknown
   return errors;
 }
 
-/** webhook 不得指向本站或内网：前者会形成自激循环，后者是 SSRF（docs/backend.md §7）。 */
+/** webhook 不得指向本站或内网：前者会形成自激循环，后者是 SSRF（README「安全」）。 */
 export function unsafeWebhookUrl(raw: string, siteUrl: string): string | null {
   let url: URL;
   let site: URL;

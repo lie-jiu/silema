@@ -67,7 +67,7 @@ const FLASH_CLASS: Record<string, string> = {
 export function Shell(props: {
   title: string;
   children: Child;
-  /** public = Shell A 签到落地页：无 NavBar 返回、无 TabBar（docs/mobile-ui.md §1.1） */
+  /** public = Shell A 签到落地页：无 NavBar 返回、无 TabBar */
   shell: "public" | "admin";
   tab?: Tab;
   /** cron 异常时仪表盘 Tab 挂红点 */

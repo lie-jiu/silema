@@ -21,7 +21,7 @@ export type OwnerRow = {
 
 /**
  * D1 只对只读查询做自动重试（release notes 原文「At the moment, only read-only queries are
- * retried」），所以状态写入必须自带重试——幂等条件写入使其可安全重放（docs/backend.md §2.4）。
+ * retried」），所以状态写入必须自带重试——幂等条件写入使其可安全重放（README「自监控与运维」）。
  */
 export async function writeWithRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastError: unknown;
@@ -40,7 +40,7 @@ export async function getOwner(db: D1Database): Promise<OwnerRow | null> {
   return db.prepare("SELECT * FROM owner WHERE id = 1").first<OwnerRow>();
 }
 
-/** `last_checkin_at >= last_judge_at` 即本周期已签到（docs/backend.md §4）。 */
+/** `last_checkin_at >= last_judge_at` 即本周期已签到（README「数据模型」）。 */
 export function checkedThisCycle(owner: OwnerRow): boolean {
   return owner.last_checkin_at != null && owner.last_checkin_at >= owner.last_judge_at;
 }

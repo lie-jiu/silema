@@ -1,4 +1,4 @@
--- 0001_init.sql — 全新初始化，无迁移包袱（docs/backend.md §4）
+-- 0001_init.sql — 全新初始化，无迁移包袱（schema 说明见 README「数据模型」）
 -- 部署 = 新建/清空 D1 → 应用本文件 → scripts/init-owner.cjs
 
 CREATE TABLE owner (

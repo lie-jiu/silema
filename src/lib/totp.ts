@@ -17,7 +17,7 @@ export function totpUri(secret: string, label: string, issuer: string): string {
 export type TotpResult = { ok: true; step: number } | { ok: false; reason: "bad" | "replay" };
 
 /**
- * 允许 ±1 步时钟漂移，但用过的步数写进 `owner.totp_last_step` 后不可再用（docs/backend.md §5）。
+ * 允许 ±1 步时钟漂移，但用过的步数写进 `owner.totp_last_step` 后不可再用（README「端点 · 认证」）。
  * 恢复码不走这里——那是同一个输入框、另一套校验。
  */
 export function verifyTotp(secret: string, code: string, lastStep: number, now = Date.now()): TotpResult {
