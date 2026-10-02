@@ -20,7 +20,7 @@
     { "pattern": "slm.liejiu.top", "custom_domain": true }
   ],
   "triggers": {
-    // 北京 12:00 发送 / 北京 24:00 判定（cron 表达式为 UTC）
+    // 北京 12:00 唯一的发送窗口 / 北京 24:00 只判定不作投递（cron 表达式为 UTC）
     "crons": ["0 4 * * *", "0 16 * * *"]
   },
   "vars": {

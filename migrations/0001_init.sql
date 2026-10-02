@@ -34,7 +34,7 @@ CREATE TABLE recipients (
   label TEXT NOT NULL DEFAULT '',
   channel_type TEXT NOT NULL,
   config_json TEXT NOT NULL,
-  on_prompt INTEGER NOT NULL DEFAULT 0,       -- 日常提醒通道（12:00 链接 + 24:00 未签到提醒）
+  on_prompt INTEGER NOT NULL DEFAULT 0,       -- 日常提醒通道（每天 12:00 唯一的那条；缺席期改用未签到提醒文案）
   on_final INTEGER NOT NULL DEFAULT 1,        -- 紧急联系人（最终消息）
   prompt_content TEXT NOT NULL DEFAULT '',
   reminder_content TEXT NOT NULL DEFAULT '',
