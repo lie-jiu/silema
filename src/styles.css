@@ -103,6 +103,8 @@
   /* 心电走线：内联 SVG，避免外部字体/图片请求（CSP img-src 'self' data:） */
   :root {
     --ecg-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='34' viewBox='0 0 240 34' fill='none'%3E%3Cpath d='M0 17h26l5-8 7 21 6-13h20l5-4 6 8 5-4h36l5-8 7 21 6-13h26' stroke='%232fd39a' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    /* 断线：公开状态页的锁死态。与 --ecg-svg 同尺寸，只换 background-image 不影响布局 */
+    --ecg-svg-flat: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='34' viewBox='0 0 240 34' fill='none'%3E%3Cpath d='M0 17h240' stroke='%23ff5f5f' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E");
   }
 }
 
@@ -365,6 +367,12 @@
   }
   .ecg-live {
     animation: sweep 9s linear infinite;
+  }
+  /* 锁死态：线断了。夜视面板上报警色必须自带辉光，否则在近黑底上读起来像普通文字 */
+  .ecg-flat {
+    background-image: var(--ecg-svg-flat);
+    filter: drop-shadow(0 0 5px rgb(255 95 95 / 0.5));
+    opacity: 0.9;
   }
 
   /* 列表行 */

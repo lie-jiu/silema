@@ -27,6 +27,7 @@ import { HealthPage } from "./routes/health";
 import { LoginPage } from "./routes/login";
 import { RecipientEditPage, RecipientsPage, ChannelFields } from "./routes/recipients";
 import { SecurityPage, SettingsPage } from "./routes/settings";
+import { LockGuidePage, StatusPage } from "./routes/status";
 import { Notice } from "./ui/kit";
 import { Shell } from "./ui/shell";
 
@@ -90,33 +91,11 @@ app.get("/api/status", async (c) => {
 });
 
 app.get("/", async (c) => {
-  const o = await getOwner(c.env.DB);
-  const s = o ? publicStatus(o, Date.now()) : null;
-  return c.html(
-    <Shell title="死了吗" shell="public">
-      <div class="p-6 text-center">
-        <div class="text-num font-semibold">死了吗</div>
-        <p class="mt-2 text-body opacity-80">每日确认系统。签到只能通过每天 12:00 发出的一次性链接完成。</p>
-        {s ? (
-          <div class="mt-6">
-            <Notice tone={s.checkedToday ? "ok" : s.state === "locked" ? "danger" : "warn"}>
-              {s.state === "locked"
-                ? "当前处于锁死状态。"
-                : s.checkedToday
-                  ? `今天已确认，连续 ${s.streak} 天。`
-                  : `今天还没确认（连续 ${s.streak} 天）。`}
-            </Notice>
-          </div>
-        ) : (
-          <div class="mt-6">
-            <Notice tone="neutral">系统尚未初始化。</Notice>
-          </div>
-        )}
-        <div class="mt-6 text-label opacity-60">公开页只给日期，不给出精确时刻。</div>
-      </div>
-    </Shell>,
-  );
+  return c.html(<StatusPage owner={await getOwner(c.env.DB)} />);
 });
+
+/** 锁死屏的下一级：静态指引，刻意不读 owner——它不需要任何状态，也就没有可泄露的东西。 */
+app.get("/help", (c) => c.html(<LockGuidePage />));
 
 app.get("/c/:token", async (c) => {
   const now = Date.now();

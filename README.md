@@ -293,14 +293,15 @@ npx tsc --noEmit         # 类型检查（package.json 里没有对应 script）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/` | 公开状态页 HTML（只给日期，不给精确时刻） |
+| GET | `/` | 公开状态页 HTML（只给日期，不给精确时刻）。按 owner 状态渲染五态之一：未初始化 / 今日已确认 / 今日未确认 / 锁死 / 刚解除锁定 |
+| GET | `/help` | 锁死屏的下一级静态指引（面向紧急联系人）。不读 owner、不含任何状态数据 |
 | GET | `/api/status` | 公开状态 JSON：`state` / `streak` / `missedStreak` / `checkedToday` / `lastCheckinDate` / `timezone`；owner 未初始化返回 503 `not_initialized` |
 | GET | `/c/:token` | 签到确认页（只渲染，不改状态）；按 IP 限流 60 次/小时 |
 | POST | `/c/:token/do` | **全站唯一签到入口**；htmx 请求回片段、其余回整页；按 IP 限流 30 次/小时 |
 | POST | `/__cron?job=daily\|send\|judge` | 手动触发 cron，需 `X-Cron-Secret` 头；缺省 `job=daily`（= 线上那次完整运行，判定 → 发送），`send` / `judge` 单跑一个阶段。`&force=1` 跳过 12h 幂等守卫（`send` 复用当日已存在的令牌，不重新清链） |
 | GET | `/assets/:name` | htmx + 三个同源小脚本；`?v=<内容哈希>`，`Cache-Control: public, max-age=31536000, immutable` |
 
-公开响应**不含任何接收人信息、也不给精确时间戳**，否则任何人都能推算出触发时刻。
+公开响应**不含任何接收人信息、也不给精确时间戳**，否则任何人都能推算出触发时刻。公开页同样**不解释机制**——发送时刻、令牌一次性、解除路径这些句子只出现在发给指定联系人的消息里，不出现在 HTML（含注释与 `aria-label`）里：`view-source:` 也是公开面。
 
 ### 认证
 
