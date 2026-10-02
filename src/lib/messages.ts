@@ -36,7 +36,8 @@ export const PLACEHOLDERS: Record<EventType, Array<{ key: string; desc: string }
 
 export const DEFAULTS: Record<EventType, string> = {
   prompt: `今日签到链接\n{site} 的每日确认链接已发出，今天 24:00 前点此确认：\n{checkin_url}`,
-  reminder: `未确认提醒（第 {reminder_index}/2 次）\n已连续 {missed_days} 天没有确认，上次确认是 {last_checkin}。点此：\n{checkin_url}`,
+  // 缺席期间 12:00 的那一条换成这段文案——同一条链接、同一天只发这一条。
+  reminder: `未确认提醒（第 {reminder_index}/2 次）\n已连续 {missed_days} 天没有确认，上次确认是 {last_checkin}。今天 24:00 前点此确认：\n{checkin_url}`,
   final: `【重要】长时间未确认\n{label}，系统已连续 {missed_days} 天未能确认我的状态，最后一次的确认时间是 {last_checkin}（锁定于 {time}）。\n如果这条消息出现了，请设法联系我确认我是否安全。\n我仍可凭此链接撤销锁定：\n{checkin_url}`,
 };
 

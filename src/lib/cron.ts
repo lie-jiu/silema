@@ -3,14 +3,17 @@ import { configOf, finalRecipients, promptRecipients, type RecipientRow } from "
 import { render, type EventType, type TemplateVars } from "./messages";
 import { deliverWithRetry, type Env } from "./send";
 import { fmtClock } from "./time";
-import { ensureRecoveryToken, housekeeping, mintReminder, rollDailyPrompt } from "./tokens";
+import { ensureRecoveryToken, housekeeping, livePromptToken, rollDailyPrompt, voidDayLinks } from "./tokens";
 
 const GUARD_MS = 12 * 3_600_000;
 const BUDGET_MS = 20_000;
 
-/** 连续缺席满 3 个 24:00 判定即锁死；缺席第 1~2 天各发一次未签到提醒。 */
+/**
+ * 连续缺席满 3 个 24:00 判定即锁死。缺席期间**不额外发消息**：次日 12:00 的那一条日常消息
+ * 自动改用「未确认提醒」文案，所以 missed_streak ∈ {1,2} 就是提醒次数，天然最多 2 次。
+ */
 export const LOCK_AT = 3;
-/** 最终消息最多送达两条：锁死当次一条 + 次日 12:00 一条，之后彻底静默。 */
+/** 最终消息最多送达两条：锁死后的第一个 12:00 一条 + 次一个 12:00 一条，之后彻底静默。 */
 export const FINAL_MAX = 2;
 
 export type CronSummary = {
@@ -93,9 +96,9 @@ async function fanout(
 }
 
 /**
- * 投递一条最终消息。锁死当次与次日 12:00 的那一条共用同一份模板与同一条 7 天恢复链接，
- * 只有至少一个通道成功才落时间戳。写哪一列由调用方指定：judge 传进来的 owner 是加锁前的快照，
- * `final_sent_at` 还留着上一次锁死的旧值，据此推断会写错列。
+ * 投递一条最终消息。两条共用同一份模板与同一条 7 天恢复链接，只有至少一个通道成功才落时间戳。
+ * 写哪一列由调用方指定：`final_sent_at` 为空说明第一条还没送达（补发也写这一列），
+ * 否则写 `final_second_at`。
  */
 async function deliverFinal(
   env: Env,
@@ -128,7 +131,7 @@ async function deliverFinal(
  * 否则一次锁死会让两个 check 在整个期间天天误报，而告警接收方是紧急联系人。
  * 两个 job 各一个独立 check URL（docs/backend.md §7）。
  */
-async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void> {
+export async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void> {
   const base = job === "send" ? env.HEARTBEAT_SEND_URL : env.HEARTBEAT_JUDGE_URL;
   if (!base) return;
   const url = `${base.replace(/\/+$/, "")}/${ok ? "pass" : "fail"}`;
@@ -139,7 +142,11 @@ async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void>
   }
 }
 
-/** 12:00 发送任务（docs/backend.md §2.1）：normal 态发当日签到链接，locked 态负责第二条、也是最后一条最终消息。 */
+/**
+ * 12:00 发送任务（docs/backend.md §2.1）：全站唯一的对外投递窗口。
+ * normal 态每天**只发一条**——缺席时同一条消息自动升级为「未确认提醒」文案，用的还是当日这条链接；
+ * locked 态负责最多两条最终消息。24:00 的判定任务不发任何东西。
+ */
 export async function runSend(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<CronSummary> {
   const db = env.DB;
   const now = opts.now ?? Date.now();
@@ -154,25 +161,34 @@ export async function runSend(env: Env, opts: { force?: boolean; now?: number } 
     return { ran: false, job: "send", skipped: "距上次发送不足 12 小时", sent: 0, failed: 0, detail: "跳过", error: null };
   }
 
-  const token = await rollDailyPrompt(db, now);
+  // force = 后台「重发今日链接」/ `/__cron?force=1`：复用当日令牌，不清链（§2.1 步 4）。
+  // 只有确实没有可复用的（当日还没铸过、或已过期）才走清链重铸，否则重发会杀死已送达链接。
+  const token = opts.force
+    ? ((await livePromptToken(db, now)) ?? (await rollDailyPrompt(db, now)))
+    : await rollDailyPrompt(db, now);
   const url = checkinUrl(env, token.token);
   const targets = await promptRecipients(db);
   if (targets.length === 0) {
     const msg = "[send] 没有配置任何「日常提醒」通道，今日链接发不出去";
     await setCronHealth(db, now, "error", msg);
-    await db.prepare("UPDATE owner SET last_send_at = ? WHERE id = 1").bind(now).run();
+    await writeWithRetry("last_send_at", () => db.prepare("UPDATE owner SET last_send_at = ? WHERE id = 1").bind(now).run());
     await ping(env, "send", false);
     return { ran: true, job: "send", sent: 0, failed: 0, detail: msg, error: msg };
   }
 
-  const r = await fanout(env, targets, "prompt", (row) => ({
+  // 缺席期：同一条消息换成提醒文案，链接仍是刚铸的当日令牌——任何时刻只有一条活链接。
+  const absent = owner.missed_streak > 0;
+  const r = await fanout(env, targets, absent ? "reminder" : "prompt", (row) => ({
     site: env.SITE_URL,
     label: row.label,
     checkin_url: url,
+    last_checkin: owner.last_checkin_at == null ? undefined : fmtClock(owner.timezone, owner.last_checkin_at),
+    missed_days: owner.missed_streak,
+    reminder_index: owner.missed_streak,
   }));
 
   // 全部通道 settle 之后才写 last_send_at，否则中途被杀会留下部分投递且无任何记录（§2.4）
-  await db.prepare("UPDATE owner SET last_send_at = ? WHERE id = 1").bind(now).run();
+  await writeWithRetry("last_send_at", () => db.prepare("UPDATE owner SET last_send_at = ? WHERE id = 1").bind(now).run());
   const ok = r.failed === 0;
   const error = ok ? null : `[send] ${r.failed}/${targets.length} 个通道失败：${r.errors.join(" | ").slice(0, 300)}`;
   await setCronHealth(db, now, ok ? "ok" : "error", error);
@@ -184,14 +200,17 @@ export async function runSend(env: Env, opts: { force?: boolean; now?: number } 
     job: "send",
     sent: r.ok,
     failed: r.failed,
-    detail: ok ? `已向 ${r.ok} 个通道发出今日链接` : (error ?? "发送失败"),
+    detail: ok
+      ? `已向 ${r.ok} 个通道发出今日${absent ? `「未确认提醒 ${owner.missed_streak}/${LOCK_AT - 1}」` : "签到链接"}`
+      : (error ?? "发送失败"),
     error,
   };
 }
 
 /**
- * 锁死后的第二条、也是最后一条最终消息（§2.1 步 0）。第一条整条失败时这里的成功算「补发」而不是
- * 第二条，所以**失败不消耗名额**、次日 12:00 继续重试；只有 `final_second_at` 落库后系统才彻底静默。
+ * 锁死后的最终消息投递——两条都由这里发，判定任务一条都不发（§2.1 步 0）。
+ * 第一条失败时这次的成功算「补发」而不是第二条，所以**失败不消耗名额**、次日 12:00 继续重试；
+ * 只有 `final_second_at` 落库后系统才彻底静默。
  * 不碰 `last_send_at`——那个时间戳只表示「今天的签到链接发出去了」，混进来会让恢复后的读数说谎。
  */
 async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise<CronSummary> {
@@ -248,14 +267,17 @@ async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise
     detail:
       r.ok > 0
         ? firstPending
-          ? `第一条最终消息补发成功，送达 ${r.ok} 个通道；次日 12:00 再发最后一条`
+          ? `第一条最终消息已送达 ${r.ok} 个通道；次日 12:00 再发最后一条`
           : `第二条最终消息已送达 ${r.ok} 个通道，此后系统不再发送任何消息`
         : (error ?? "发送失败"),
     error,
   };
 }
 
-/** 24:00 判定任务（docs/backend.md §2.2）。 */
+/**
+ * 24:00 判定任务（docs/backend.md §2.2）：**只判定，一条消息都不发**——缺席计数、锁死与作废
+ * 当日链接都在这里完成，投递全部归 12:00 的 send。
+ */
 export async function runJudge(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<CronSummary> {
   const db = env.DB;
   const now = opts.now ?? Date.now();
@@ -276,6 +298,10 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
   }
 
   const windowStart = owner.last_judge_at;
+  // 判定即「这一天过去了」：把已到期的当日链接物理删掉，此后任何点击都只可能显示「已失效」。
+  // 只删 expires_at <= now，所以白天 force=1 手动跑判定不会杀掉当天还活着的那条。
+  await voidDayLinks(db, now);
+
   // 健康判定必须在更新 last_judge_at 之前求值：条件是 last_send_at 落在本次窗口内，
   // 不是「早于 last_judge_at」——正常情况下 send 12:00、judge 24:00，后者会每天误报（§2.2 step 6）。
   const sentInWindow = owner.last_send_at != null && owner.last_send_at >= windowStart && owner.last_send_at < now;
@@ -315,35 +341,26 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
     );
     if ((res.meta?.changes ?? 0) === 0) return abandoned(env, now, windowStart);
 
-    if (!(await stillAbsent(db, windowStart))) return abandoned(env, now, windowStart);
-
-    const token = await mintReminder(db, now);
-    const url = checkinUrl(env, token);
-    const targets = await promptRecipients(db);
-    const r = await fanout(env, targets, "reminder", (row) => ({
-      site: env.SITE_URL,
-      label: row.label,
-      checkin_url: url,
-      last_checkin: owner.last_checkin_at == null ? undefined : fmtClock(owner.timezone, owner.last_checkin_at),
-      missed_days: newStreak,
-      reminder_index: newStreak,
-    }));
-    const error = missingSend ?? (r.failed > 0 ? `[judge] 提醒 ${r.failed}/${targets.length} 失败：${r.errors.join(" | ").slice(0, 200)}` : null);
-    await setCronHealth(db, now, error ? "error" : "ok", error);
-    await ping(env, "judge", !error);
+    // 提醒不在这里发：缺席期内的「未确认提醒」就是次日 12:00 的那一条日常消息换了文案，
+    // 用的仍是当日令牌，所以任何时刻最多一条活链接（§2.1）。
+    await setCronHealth(db, now, missingSend ? "error" : "ok", missingSend);
+    await ping(env, "judge", !missingSend);
     await recordJudge(db, now);
     await housekeeping(db, now);
     return {
       ran: true,
       job: "judge",
-      sent: r.ok,
-      failed: r.failed,
-      detail: `连续缺席第 ${newStreak}/${LOCK_AT - 1} 次提醒已发出`,
-      error,
+      sent: 0,
+      failed: 0,
+      detail: `连续缺席 ${newStreak} 天，未发送任何消息；次日 12:00 的那一条改用提醒文案`,
+      error: missingSend,
     };
   }
 
-  // 缺席满 LOCK_AT 天：锁死。两个送达时间戳都必须显式清空，否则第二次锁死会读到上一次的记录、
+  // 缺席满 LOCK_AT 天：锁死。这里**不做任何投递**，第一条最终消息由次日 12:00 的 send 发出——
+  // 代价是紧急联系人比锁死那一刻晚约 12 小时知道。这段时间里没有可用的签到入口
+  // （当日链接刚被作废，锁定期又不铸新的），所以别把这段窗口当成「还能撤销」。
+  // 两个送达时间戳都必须显式清空，否则第二次锁死会读到上一次的记录、
   // 「最多两条」直接失效。
   const res = await conditionalUpdate(
     db,
@@ -352,36 +369,24 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
     windowStart,
   );
   if ((res.meta?.changes ?? 0) === 0) return abandoned(env, now, windowStart);
-  if (!(await stillAbsent(db, windowStart))) return abandoned(env, now, windowStart);
 
-  const r = await deliverFinal(env, owner, now, { missedDays: newStreak, lockedAt: now, column: "final_sent_at" });
-  const error =
-    missingSend ??
-    (r.targets.length === 0
-      ? "[judge] 已锁死但没有任何「紧急联系人」通道，最终消息发给了空气"
-      : r.failed > 0
-        ? `[judge] 最终消息 ${r.failed}/${r.targets.length} 失败，明日 12:00 重试`
-        : null);
-  await setCronHealth(db, now, error ? "error" : "ok", error);
-  await ping(env, "judge", !error);
+  await setCronHealth(db, now, missingSend ? "error" : "ok", missingSend);
+  await ping(env, "judge", !missingSend);
   await recordJudge(db, now);
   await housekeeping(db, now);
 
   return {
     ran: true,
     job: "judge",
-    sent: r.ok,
-    failed: r.failed,
-    detail:
-      r.ok > 0
-        ? `已锁死，第一条最终消息送达 ${r.ok} 个通道；次日 12:00 再发最后一条`
-        : "已锁死，最终消息未送达，系统每天 12:00 自动重试",
-    error,
+    sent: 0,
+    failed: 0,
+    detail: `连续缺席满 ${newStreak} 个周期，已锁死；本任务不发消息，第一条最终消息由次日 12:00 发出`,
+    error: missingSend,
   };
 }
 
 /**
- * locked 态的判定：什么都不发（第二条归 12:00 的 send 管），只推进时间戳并保留 send 记下的错误。
+ * locked 态的判定：本来就不发任何东西（两条最终消息都归 12:00 的 send 管），只推进时间戳并保留 send 记下的错误。
  * 照常推进 `last_judge_at` 与喂狗，否则 §7 的 25h 健康阈值会在整个锁死期天天误报。
  */
 async function runLockedIdle(env: Env, owner: OwnerRow, now: number): Promise<CronSummary> {

@@ -152,9 +152,6 @@ if (scenario !== "fresh" && !scenario.startsWith("locked")) {
   push("待确认（今日链接）", "preview-live", "prompt", bj(0, 12, 0), liveExpire, null);
   push("今日已签到（已消费）", "preview-used", "prompt", bj(0, 12, 0), liveExpire, bj(0, 12, 4));
 }
-if (scenario === "miss2") {
-  push("提醒链接（12h TTL）", "preview-reminder", "reminder", bj(-1, 16, 0), bj(-1, 16, 0) + 12 * 3600000, null);
-}
 if (scenario.startsWith("locked")) {
   push("恢复链接（7 天）", "preview-recovery", "final", bj(0, 0, 0), bj(0, 0, 0) + 7 * 86400000, null);
 }

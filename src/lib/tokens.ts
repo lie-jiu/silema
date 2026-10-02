@@ -23,10 +23,15 @@ export async function mint(
   now = Date.now(),
 ): Promise<string> {
   const token = randomHex(32);
-  await db
-    .prepare("INSERT INTO checkin_tokens (token, purpose, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .bind(token, purpose, now, expiresAt)
-    .run();
+  // ON CONFLICT DO NOTHING 让重试可安全重放：第一次其实落库成功、只是响应丢了。
+  await writeWithRetry("铸造令牌", () =>
+    db
+      .prepare(
+        "INSERT INTO checkin_tokens (token, purpose, created_at, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(token) DO NOTHING",
+      )
+      .bind(token, purpose, now, expiresAt)
+      .run(),
+  );
   return token;
 }
 
@@ -45,16 +50,38 @@ export async function rollDailyPrompt(db: D1Database, now = Date.now()): Promise
     db.batch([
       db.prepare("DELETE FROM checkin_tokens WHERE purpose != 'test'"),
       db
-        .prepare("INSERT INTO checkin_tokens (token, purpose, created_at, expires_at) VALUES (?, 'prompt', ?, ?)")
+        .prepare(
+          "INSERT INTO checkin_tokens (token, purpose, created_at, expires_at) VALUES (?, 'prompt', ?, ?) ON CONFLICT(token) DO NOTHING",
+        )
         .bind(token, now, expiresAt),
     ]),
   );
   return { token, purpose: "prompt", created_at: now, expires_at: expiresAt, used_at: null };
 }
 
-/** 提醒令牌 TTL 12h，与次日 12:00 的清链一致（docs/backend.md §2.3）。 */
-export async function mintReminder(db: D1Database, now = Date.now()): Promise<string> {
-  return mint(db, "reminder", now + 12 * 3_600_000, now);
+/**
+ * 重发用的当日令牌：`/api/cron/resend` 与 `/__cron?force=1` 复用这条，不重新清链
+ * （docs/backend.md §2.1 步 4、§7；README「重发的仍是同一条当日令牌」）——
+ * 清链会让已经送达的消息里那条链接当场变「已失效」，而重发本是「链接没送到」的补救手段。
+ * 刻意不过滤 `used_at`：今天已签过再重发，接收人看到「今日已签」才是事实。
+ */
+export async function livePromptToken(db: D1Database, now = Date.now()): Promise<TokenRow | null> {
+  return db
+    .prepare("SELECT * FROM checkin_tokens WHERE purpose = 'prompt' AND expires_at > ? ORDER BY created_at DESC")
+    .bind(now)
+    .first<TokenRow>();
+}
+
+/**
+ * 24:00 判定任务作废当日链接：物理删除**已到期**的 daily/reminder 令牌。
+ * 只删已到期的，所以 `force=1` 在白天手动跑判定不会杀掉当天那条还活着的链接；
+ * 当日令牌的到期时刻正是墙钟 24:00，正常 cron 跑到的那一刻条件必然成立。
+ * 恢复链接（`final`，TTL 7 天）不在删除范围内——锁定期它是唯一的自救入口。
+ */
+export async function voidDayLinks(db: D1Database, now = Date.now()): Promise<void> {
+  await writeWithRetry("作废当日链接", () =>
+    db.prepare("DELETE FROM checkin_tokens WHERE purpose IN ('prompt','reminder') AND expires_at <= ?").bind(now).run(),
+  );
 }
 
 /** 恢复链接 TTL 7 天；锁死期间逐日复用未过期那条（docs/backend.md §2.2）。 */
@@ -68,8 +95,10 @@ export async function ensureRecoveryToken(db: D1Database, now = Date.now()): Pro
 }
 
 export async function housekeeping(db: D1Database, now = Date.now()): Promise<void> {
-  await db.batch([
-    db.prepare("DELETE FROM checkin_tokens WHERE expires_at < ? AND purpose != 'prompt'").bind(now),
-    db.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - 86_400_000),
-  ]);
+  await writeWithRetry("清理过期数据", () =>
+    db.batch([
+      db.prepare("DELETE FROM checkin_tokens WHERE expires_at < ? AND purpose != 'prompt'").bind(now),
+      db.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - 86_400_000),
+    ]),
+  );
 }
