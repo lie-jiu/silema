@@ -395,7 +395,7 @@ function MessageBlock(props: {
     <div>
       <label for={props.id} class="block text-label opacity-60 mb-1">
         {props.label}
-        {props.needed ? <span class="text-danger"> *</span> : <span class="opacity-50">（未勾选对应事件，可留空）</span>}
+        {props.needed ? <span class="opacity-50">（留空则用内置默认文案）</span> : <span class="opacity-50">（未勾选对应事件，可留空）</span>}
       </label>
       <div class="flex flex-wrap gap-1 mb-2">
         {chips[props.event].map((c) => (

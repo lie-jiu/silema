@@ -506,10 +506,19 @@ function validateRecipient(v: FormValues, existing: Record<string, string>, site
     if (bad) errors.push(`field:${bad}`);
   }
   if (!v.onPrompt && !v.onFinal) errors.push("至少要订阅一个事件（日常提醒或紧急联系人）");
-  if (v.onPrompt && !(v.promptContent.trim() && v.reminderContent.trim())) {
-    errors.push("勾选「日常提醒」就必须填写日常链接文案和未签到提醒文案");
+  // 留空 = 用内置默认文案（默认文案里都有 {checkin_url}），所以这里只约束**填了内容**的模板。
+  // 自定义文案少了 {checkin_url} 会静默发出一条「看着正常、点了没反应」的消息：缺席那天
+  // 那条就是当天唯一的签到入口，而锁死后最终消息里的那条是唯一的自救链接。
+  const needsLink: Array<[string, string]> = [
+    ["日常签到链接", v.promptContent],
+    ["未签到提醒", v.reminderContent],
+    ["最终消息", v.finalContent],
+  ];
+  for (const [name, text] of needsLink) {
+    if (text.trim() && !text.includes("{checkin_url}")) {
+      errors.push(`「${name}」的自定义文案必须包含 {checkin_url}；想用内置默认文案就把它留空`);
+    }
   }
-  if (v.onFinal && !v.finalContent.trim()) errors.push("勾选「紧急联系人」就必须填写最终消息文案");
   return errors;
 }
 
