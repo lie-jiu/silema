@@ -44,13 +44,19 @@ function install(el) {
     if (start > 0) raf = requestAnimationFrame(step);
   };
 
-  // 释放监听挂在 document 上：指针在按钮外松开时元素收不到 pointerup，只绑元素会让
-  // 「按下 → 拖出 → 松手」在 0.6s 到点时照样完成签到（误续命方向，比签不上更危险）。
+  // 释放监听一律挂 document：指针/按键在按钮之外松开时元素收不到事件，只绑元素会让
+  // 「按下 → 拖出 → 松手」在 0.6s 到点时照样完成签到（误续命方向，比签不上更危险），
+  // 而键盘长按期间焦点被 htmx 换掉就永远等不到 keyup，active 卡在 true 上再也按不动。
+  const detach = () => {
+    document.removeEventListener("pointerup", release);
+    document.removeEventListener("pointercancel", release);
+    document.removeEventListener("keyup", releaseKey);
+  };
+
   const release = () => {
     if (!active) return;
     active = false;
-    document.removeEventListener("pointerup", release);
-    document.removeEventListener("pointercancel", release);
+    detach();
     if (!done) rollback();
   };
 
@@ -62,6 +68,7 @@ function install(el) {
     raf = requestAnimationFrame(tick);
     document.addEventListener("pointerup", release);
     document.addEventListener("pointercancel", release);
+    document.addEventListener("keyup", releaseKey);
   };
 
   const down = (e) => {
@@ -77,11 +84,12 @@ function install(el) {
     e.preventDefault();
     start();
   };
-  const keyUp = (e) => {
+  function releaseKey(e) {
     if (isHoldKey(e)) release();
-  };
+  }
 
   const reset = () => {
+    detach();
     done = false;
     active = false;
     progress(el, 0);
@@ -89,7 +97,6 @@ function install(el) {
 
   el.addEventListener("pointerdown", down);
   el.addEventListener("keydown", keyDown);
-  el.addEventListener("keyup", keyUp);
   el.addEventListener("contextmenu", (e) => e.preventDefault());
   el.addEventListener("htmx:afterSwap", reset);
   el.addEventListener("htmx:responseError", reset);
