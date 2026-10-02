@@ -9,11 +9,12 @@ const GUARD_MS = 12 * 3_600_000;
 const BUDGET_MS = 20_000;
 
 /**
- * 连续缺席满 3 个 24:00 判定即锁死。缺席期间**不额外发消息**：次日 12:00 的那一条日常消息
- * 自动改用「未确认提醒」文案，所以 missed_streak ∈ {1,2} 就是提醒次数，天然最多 2 次。
+ * 连续缺席满 3 个周期即锁死。周期 = 相邻两次 12:00 运行之间（当日链接在墙钟 24:00 到期）。
+ * 缺席期间**不额外发消息**：次日 12:00 的那一条日常消息自动改用「未确认提醒」文案，
+ * 所以 missed_streak ∈ {1,2} 就是提醒次数，天然最多 2 次。
  */
 export const LOCK_AT = 3;
-/** 最终消息最多送达两条：锁死后的第一个 12:00 一条 + 次一个 12:00 一条，之后彻底静默。 */
+/** 最终消息最多送达两条：锁死那次的 12:00 一条 + 次一个 12:00 一条，之后彻底静默。 */
 export const FINAL_MAX = 2;
 
 export type CronSummary = {
@@ -26,14 +27,20 @@ export type CronSummary = {
   error: string | null;
 };
 
-export function parseCron(expr: string): "send" | "judge" | null {
+/** 一次 cron 运行 = 判定 + 发送两个阶段，两边的结果都要留痕。 */
+export type DailySummary = {
+  job: "daily";
+  judge: CronSummary;
+  send: CronSummary;
+  error: string | null;
+};
+
+/** 只认 `wrangler.jsonc` 里那一条 cron；对不上的表达式不执行任何任务（§2）。 */
+export function parseCron(expr: string): "daily" | null {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return null;
   const [minute, hour] = parts as [string, string];
-  if (minute !== "0") return null;
-  if (hour === "4") return "send";
-  if (hour === "16") return "judge";
-  return null;
+  return minute === "0" && hour === "4" ? "daily" : null;
 }
 
 function checkinUrl(env: Env, token: string): string {
@@ -129,7 +136,7 @@ async function deliverFinal(
  * 心跳监控的是「调度器有没有跑到这一步」，不是「消息有没有发出去」。
  * 所以按设计跳过的路径（locked 不发日常链接、12h 幂等守卫、两条最终消息已发满的静默期）同样要喂狗——
  * 否则一次锁死会让两个 check 在整个期间天天误报，而告警接收方是紧急联系人。
- * 两个 job 各一个独立 check URL（README「自监控与运维」）。
+ * 两个阶段各一个独立 check URL，由同一次运行分别喂（README「自监控与运维」）——判定炸了与发送炸了因此仍可区分。
  */
 export async function ping(env: Env, job: "send" | "judge", ok: boolean): Promise<void> {
   const base = job === "send" ? env.HEARTBEAT_SEND_URL : env.HEARTBEAT_JUDGE_URL;
@@ -143,9 +150,44 @@ export async function ping(env: Env, job: "send" | "judge", ok: boolean): Promis
 }
 
 /**
- * 12:00 发送任务（README「它每天怎么运转」）：全站唯一的对外投递窗口。
+ * 每天 12:00 那唯一一次 cron 运行：先判定上一周期，再发出今天这一条（README「它每天怎么运转」）。
+ *
+ * 判定必须排在发送之前——`missed_streak` 决定这一条用日常文案还是「未确认提醒」文案；而缺席满
+ * `LOCK_AT` 次时，判定刚落下的 locked 会被同一次运行的发送阶段读到，第一条最终消息因此与锁死
+ * 同刻投出。分成两条 cron 时它要等 12 小时，而那段窗口里 owner 手里一条自救链接都没有。
+ *
+ * 两个阶段各自兜异常：判定炸了不能连累当天的投递。
+ */
+export async function runDaily(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<DailySummary> {
+  const now = opts.now ?? Date.now();
+  const judge = await runPhase(env, "judge", () => runJudge(env, opts));
+  const send = await runPhase(env, "send", () => runSend(env, opts));
+  const error = [judge.error, send.error].filter(Boolean).join(" | ") || null;
+  // 两个阶段各自写过一次 last_cron_*，这里用合并结果收尾：否则紧随其后一次正常的发送
+  // 会把判定留下的 error 盖掉，而 owner 行只有这一个槽位（§2.2 步 7）。
+  try {
+    await setCronHealth(env.DB, now, error ? "error" : "ok", error);
+  } catch (err) {
+    console.error("[daily] 合并健康写入失败", err);
+  }
+  return { job: "daily", judge, send, error };
+}
+
+async function runPhase(env: Env, job: "send" | "judge", fn: () => Promise<CronSummary>): Promise<CronSummary> {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = `[${job}] 未捕获异常：${String(err instanceof Error ? err.message : err).slice(0, 300)}`;
+    console.error(msg, err);
+    await ping(env, job, false);
+    return { ran: false, job, sent: 0, failed: 0, detail: msg, error: msg };
+  }
+}
+
+/**
+ * 发送阶段（README「它每天怎么运转」）：全站唯一的对外投递窗口，每天 12:00 紧跟判定之后跑。
  * normal 态每天**只发一条**——缺席时同一条消息自动升级为「未确认提醒」文案，用的还是当日这条链接；
- * locked 态负责最多两条最终消息。24:00 的判定任务不发任何东西。
+ * locked 态负责最多两条最终消息。判定阶段不发任何东西。
  */
 export async function runSend(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<CronSummary> {
   const db = env.DB;
@@ -208,7 +250,7 @@ export async function runSend(env: Env, opts: { force?: boolean; now?: number } 
 }
 
 /**
- * 锁死后的最终消息投递——两条都由这里发，判定任务一条都不发（§2.1 步 0）。
+ * 锁死后的最终消息投递——两条都由这里发，判定阶段一条都不发（§2.1 步 0）。
  * 第一条失败时这次的成功算「补发」而不是第二条，所以**失败不消耗名额**、次日 12:00 继续重试；
  * 只有 `final_second_at` 落库后系统才彻底静默。两条之间还有一道 12 小时护栏，
  * 挡住手动触发把两条烧进同一小时。
@@ -294,8 +336,8 @@ async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise
 }
 
 /**
- * 24:00 判定任务（README「它每天怎么运转」）：**只判定，一条消息都不发**——缺席计数、锁死与作废
- * 当日链接都在这里完成，投递全部归 12:00 的 send。
+ * 判定阶段（README「它每天怎么运转」）：**只判定，一条消息都不发**——缺席计数、锁死与作废当日
+ * 链接都在这里完成，投递全部归紧随其后的发送阶段。窗口 = 相邻两次运行之间（约 24 小时）。
  */
 export async function runJudge(env: Env, opts: { force?: boolean; now?: number } = {}): Promise<CronSummary> {
   const db = env.DB;
@@ -321,8 +363,9 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
   // 只删 expires_at <= now，所以白天 force=1 手动跑判定不会杀掉当天还活着的那条。
   await voidDayLinks(db, now);
 
-  // 健康判定必须在更新 last_judge_at 之前求值：条件是 last_send_at 落在本次窗口内，
-  // 不是「早于 last_judge_at」——正常情况下 send 12:00、judge 24:00，后者会每天误报（§2.2 step 7）。
+  // 健康判定必须在更新 last_judge_at 之前求值：条件是 last_send_at 落在本次窗口 [windowStart, now) 内，
+  // 不是「早于 last_judge_at」——同一次运行里判定先于发送，上一周期的 last_send_at 永远晚于
+  // 上一周期的 last_judge_at，按后者会每天误报（§2.2 step 7）。
   const sentInWindow = owner.last_send_at != null && owner.last_send_at >= windowStart && owner.last_send_at < now;
   const missingSend = sentInWindow
     ? null
@@ -371,14 +414,13 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
       job: "judge",
       sent: 0,
       failed: 0,
-      detail: `连续缺席 ${newStreak} 天，未发送任何消息；次日 12:00 的那一条改用提醒文案`,
+      detail: `连续缺席 ${newStreak} 天，本阶段不发送任何消息；当天那条日常消息改用提醒文案`,
       error: missingSend,
     };
   }
 
-  // 缺席满 LOCK_AT 天：锁死。这里**不做任何投递**，第一条最终消息由次日 12:00 的 send 发出——
-  // 代价是紧急联系人比锁死那一刻晚约 12 小时知道。这段时间里没有可用的签到入口
-  // （当日链接刚被作废，锁定期又不铸新的），所以别把这段窗口当成「还能撤销」。
+  // 缺席满 LOCK_AT 天：锁死。这里**不做任何投递**，第一条最终消息由同一次运行紧随其后的发送阶段
+  // 投出，两者之间没有空窗——当日链接刚被作废、锁定期又不铸新的，那段空窗里本来一条自救入口都没有。
   // 两个送达时间戳都必须显式清空，否则第二次锁死会读到上一次的记录、
   // 「最多两条」直接失效。
   const res = await conditionalUpdate(
@@ -399,13 +441,13 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
     job: "judge",
     sent: 0,
     failed: 0,
-    detail: `连续缺席满 ${newStreak} 个周期，已锁死；本任务不发消息，第一条最终消息由次日 12:00 发出`,
+    detail: `连续缺席满 ${newStreak} 个周期，已锁死；本阶段不发消息，第一条最终消息由同一次运行的发送阶段投出`,
     error: missingSend,
   };
 }
 
 /**
- * locked 态的判定：本来就不发任何东西（两条最终消息都归 12:00 的 send 管），只推进时间戳并保留 send 记下的错误。
+ * locked 态的判定：本来就不发任何东西（两条最终消息都归发送阶段管），只推进时间戳并保留 send 记下的错误。
  * 照常推进 `last_judge_at` 与喂狗，否则 §7 的 25h 健康阈值会在整个锁死期天天误报。
  */
 async function runLockedIdle(env: Env, owner: OwnerRow, now: number): Promise<CronSummary> {

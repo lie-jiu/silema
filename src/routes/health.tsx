@@ -29,7 +29,7 @@ export function HealthPage(props: { owner: OwnerRow | null; health: Health; flas
           <div class="pb-3.5">
             <Notice tone="info">
               看时间戳，不看最后一次 cron 的结果。owner 行只有一个 <code class="readout">last_cron_error</code>{" "}
-              槽位，判定记的 error 会被 12 小时后一次正常的发送覆盖，所以后台直接用{" "}
+              槽位，同一次运行里判定与发送的错误合并写进这一格、下一次运行又整格覆盖，所以后台直接用{" "}
               <code class="readout">now − last_send_at &gt; {LIMITS.SEND_LIMIT_H}h</code> 与{" "}
               <code class="readout">now − last_judge_at &gt; {LIMITS.JUDGE_LIMIT_H}h</code> 判红。
             </Notice>
@@ -48,7 +48,7 @@ export function HealthPage(props: { owner: OwnerRow | null; health: Health; flas
             note={props.health.send.note}
           />
           <Line
-            label="最近判定 · 24:00（不发任何消息）"
+            label="最近判定 · 12:00 发送之前（不发任何消息）"
             level={o ? props.health.judge.level : "unknown"}
             value={o ? fmtClock(tz, o.last_judge_at) : "读不到数据"}
             meta={o ? fmtAgo(o.last_judge_at, props.now) : "—"}
@@ -56,7 +56,7 @@ export function HealthPage(props: { owner: OwnerRow | null; health: Health; flas
           />
           <div class="h-px bg-ink/6"></div>
           <div class="px-4 pt-3.5 pb-1">
-            <Label>外部心跳（两个独立 check）</Label>
+            <Label>外部心跳（两个 check，由同一次 12:00 运行分别喂）</Label>
           </div>
           <Line
             label="heartbeat · send"
@@ -88,7 +88,7 @@ export function HealthPage(props: { owner: OwnerRow | null; health: Health; flas
               {o.last_cron_error}
             </pre>
             <div class="mt-2.5 text-label opacity-60">
-              前缀 <code class="readout">[send]</code> / <code class="readout">[judge]</code> 标明是哪个任务。
+              前缀 <code class="readout">[send]</code> / <code class="readout">[judge]</code> 标明是哪个阶段。
             </div>
           </Card>
         ) : null}

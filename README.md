@@ -29,25 +29,26 @@
 
 ---
 
-**所有消息只在每天 12:00 发**（24:00 你在睡觉），每天严格一条；24:00 只做判定与作废当日链接，一条都不发。连续缺席到第 3 天判定为锁死，紧急联系人次日 12:00 收到预设的最终消息，再次日 12:00 收到最后一条，之后**彻底静默**。只有 owner 再次签到才能恢复。
+**所有消息只在每天 12:00 发**（半夜不打扰），每天严格一条。12:00 那唯一一次运行**先判定上一周期**（不发任何消息、作废已到期的当日链接），**再发出今天这条**；当日链接仍固定在墙钟 24:00 到期。连续缺席到第 3 天即锁死，紧急联系人在**锁死那一刻**收到预设的最终消息，次日 12:00 收到最后一条，之后**彻底静默**。只有 owner 再次签到才能恢复。
 
-本文自带全部规格：状态机与两条 cron 见[它每天怎么运转](#它每天怎么运转)，接口面见[端点](#端点)，schema 见[数据模型](#数据模型)，安全约定见[安全](#安全)，边界与代价见[使用前必须知道的边界](#使用前必须知道的边界)与[已知取舍](#已知取舍)。
+本文自带全部规格：状态机与每日任务见[它每天怎么运转](#它每天怎么运转)，接口面见[端点](#端点)，schema 见[数据模型](#数据模型)，安全约定见[安全](#安全)，边界与代价见[使用前必须知道的边界](#使用前必须知道的边界)与[已知取舍](#已知取舍)。
 
 ## 它每天怎么运转
 
-| 时刻（北京） | 任务 | 做什么 |
+| 时刻（北京） | 阶段 | 做什么 |
 |---|---|---|
-| 12:00 | `send` | **唯一的发送窗口，每天只发一条**。normal 态：物理删除全部旧链接 → 铸造当日链接 → **无条件**发给所有「日常提醒」通道（当天已签到也发）；缺席期这一条自动换成「未签到提醒」文案，用的还是当日同一条链接。locked 态：投递最终消息 |
-| 24:00 | `judge` | **一条都不发**：本周期签到过 → 缺席计数归零；没签 → 缺席 +1，并作废已到期的当日链接 |
-| 缺席第 3 天 24:00 | `judge` | **锁死**（静默，不做任何投递） |
-| 缺席第 4 天 12:00 | `send` | 第一条最终消息，附一条 7 天有效的恢复链接 |
-| 缺席第 5 天 12:00 | `send` | 第二条、也是最后一条。**发满两条后系统不再发送任何消息** |
-| 之后 | 两个任务 | 只推进时间戳、照常喂心跳 |
+| 每天 12:00 | `judge` | **一条都不发**：上一周期签到过 → 缺席计数归零；没签 → 缺席 +1，并物理删除已到期的当日链接（它在前一晚 24:00 就到期了） |
+| 紧接着 | `send` | **唯一的发送窗口，每天只发一条**。normal 态：物理删除全部旧链接 → 铸造当日链接（24:00 到期）→ **无条件**发给所有「日常提醒」通道（当天已签到也发）；缺席期这一条自动换成「未签到提醒」文案，用的还是当日同一条链接。locked 态：投递最终消息 |
+| 第 1 天没签 → 第 2 天 12:00 | `judge` → `send` | 记缺席 1；当天那一条改用提醒文案（1/2） |
+| 第 3 天 12:00 | `judge` → `send` | 记缺席 2；提醒文案（2/2），即最后警告 |
+| 第 4 天 12:00 | `judge` → `send` | 记缺席 3 → **锁死**，同一次运行立刻投出第一条最终消息，附一条 7 天有效的恢复链接 |
+| 第 5 天 12:00 | `send` | 第二条、也是最后一条。**发满两条后系统不再发送任何消息** |
+| 之后 | 两个阶段 | 只推进时间戳、照常喂心跳 |
 | 再次签到 | — | 立即恢复 `normal`、缺席归零，同时撤销还没发出的那一条。已发出的最终消息**不可撤回** |
 
-两条固定 cron 写在 `wrangler.jsonc` 的 `triggers.crons`（UTC `0 4` / `0 16`）。改时间 = 改这里并重新部署，后台没有签到时限类设置。
+只有**一条** cron，写在 `wrangler.jsonc` 的 `triggers.crons`（UTC `0 4` = 北京 12:00）；判定与发送是这一次运行里的两个阶段，顺序固定为 `judge → send`。改时间 = 改这里并重新部署，后台没有签到时限类设置。之所以不拆成两条：cron trigger 的额度是**账号级 5 条**（Free 计划），而判定根本不需要在午夜准点跑。
 
-**为什么投递全压在 12:00**：24:00 是睡觉时间，那时发的提醒你不会看到，而它还要多占一条活链接。代价是紧急联系人比「锁死那一刻」晚约 12 小时才知道。这段窗口里你手里没有任何链接（当日链接刚被判定作废，锁定期又不铸新的），所以它不是「还能撤销」的缓冲——只是把打扰从半夜挪到中午。
+**为什么全压在 12:00**：24:00 是睡觉时间，那时发的提醒你不会看到，而它还要多占一条活链接。判定自己一条消息都不发，当日链接反正在墙钟 24:00 到期，所以把它挪到次日 12:00、排在发送之前，**对外的消息时刻表一模一样**——而锁死与第一条最终消息变成了同刻投递。早先分两条 cron 时，紧急联系人要比「锁死那一刻」晚约 12 小时才知道，而那半天里你手里一条链接都没有（当日链接刚被作废，锁定期又不铸新的），所以那段窗口从来不是「还能撤销」的缓冲。
 
 **「失败不消耗名额」**：名额按**送达**计。第一条整条失败时，次日 12:00 那次算补发而不是第二条，之后每天 12:00 继续重试，直到至少一个通道成功；成功后第二天 12:00 才发最后一条。所以紧急联系人最多收到两条，而通道临时故障不会让消息永久丢失。
 
@@ -57,7 +58,7 @@
 - **后台没有签到按钮，也不存在 `POST /api/checkin`**。这是刻意的：「已签到」必须等价于「今天真的收到并点开了链接」，不能退化成登录后台点一下就算活着。
 - `GET /c/:token` 只渲染确认页，长按确认才 `POST /c/:token/do`。邮件网关的自动抓取与 Safe Links 不会替你续命。
 - **链接没送到 = 当天无法签到**，缺席期那条提醒就是当日链接本身（不是额外的第二条），连着两天没点开、第 3 天就会误锁死。唯一的补救是后台「重发今日链接」（`POST /api/cron/resend`），它重发的仍是同一条当日令牌，不算签到。
-- **锁死后系统不再主动给你任何链接**：日常链接在 locked 态一律不发（当日链接已在 24:00 被判定作废），「重发今日链接」也被拒。恢复只能点最终消息里那条 7 天有效的链接——它在锁死后的**次日 12:00** 才发出，所以那半天你手里一条链接都没有。**链接过期即无从签到**，这是刻意的：过了这个窗口就认为你确实出事了。
+- **锁死后系统不再主动给你任何链接**：日常链接在 locked 态一律不发（当日链接已在 24:00 到期、被次日 12:00 的判定物理删除），「重发今日链接」也被拒。恢复只能点最终消息里那条 7 天有效的链接——它与锁死在同一次 12:00 运行里投出，所以不存在「已锁死但手里一条链接都没有」的空窗。**链接过期即无从签到**，这是刻意的：过了这个窗口就认为你确实出事了。
 - 不落签到流水、不落投递记录（唯一例外是 `owner.final_sent_at` / `final_second_at` 这两个送达时间戳，它们决定最终消息还欠几条）。**没有签到日历和趋势图**，这是刻意的存储面收敛。
 - `recipients.config_json` 明文存 D1（除 `email` 外的通道凭据只能按接收人存）。GET 一律脱敏，机密性依赖 D1 的账号级访问控制。
 
@@ -67,12 +68,12 @@
 
 ### 签到与状态机
 
-- **一天严格一条**：12:00 是唯一投递窗口，24:00 只判定与作废链接
+- **一天严格一条**：12:00 是唯一投递窗口；判定排在同一次运行的发送之前，它自己一条都不发
 - **签到只有链接一个入口**：`performCheckin` 的唯一调用方是 `POST /c/:token/do`
 - **GET 只渲染、POST 才消费**：防邮件网关自动抓取替所有者续命
 - **缺席自动换文案**：`missed_streak` 1~2 时次日那一条改用「未签到提醒」模板，用的还是当日同一条令牌——缺席期不存在第二条活链接
-- **连续缺席 3 天锁死**（`LOCK_AT = 3`），锁死当次静默，最终消息由次日 12:00 的 `send` 投递
-- **最终消息最多两条**（`FINAL_MAX = 2`），按**送达**计而非按尝试计，发满后两个任务只推进时间戳
+- **连续缺席 3 天锁死**（`LOCK_AT = 3`），判定本身静默，第一条最终消息由**同一次运行**的发送阶段投出
+- **最终消息最多两条**（`FINAL_MAX = 2`），按**送达**计而非按尝试计，发满后两个阶段只推进时间戳
 - **两条最终消息之间有一道 12 小时护栏**：`final_sent_at` 距今不足 12h 就跳过第二条，否则连点两次 `/__cron` 会把相隔一天的两条塌进同一小时——而第二条存在的意义正是给你一整个白天去撤销第一条
 - **任何时刻最多一条业务链接**：新链接原地物理删除全部旧链接；到期时刻取**固定墙钟** 24:00（不是 `created_at + 12h`），cron 晚触发几分钟也不会让令牌活过自己的判定窗口
 - **签到无冷却**，同日重复点击显示「今日已签到」而不重复计数；确认页严格区分**待确认 / 今日已签到 / 已失效**三态
@@ -112,9 +113,9 @@
 ### 自监控与运维
 
 - **后台健康不看 `last_cron_*`**（那个槽位只有一份，会被下一次成功的 cron 覆盖），直接看时间戳：`now - last_send_at > 13h`（locked 态豁免）或 `now - last_judge_at > 25h` 即标红；取不到数据一律显示「未知」并标红，**绝不默认绿**
-- **外部心跳按 job 拆成两个独立 check**：`HEARTBEAT_SEND_URL` 阈值 13h、`HEARTBEAT_JUDGE_URL` 阈值 25h，各自 POST `<URL>/pass` 或 `<URL>/fail`
+- **外部心跳按阶段拆成两个 check**：`HEARTBEAT_SEND_URL` 阈值 13h、`HEARTBEAT_JUDGE_URL` 阈值 25h，各自 POST `<URL>/pass` 或 `<URL>/fail`。两个 check 由同一次 12:00 运行分别喂，所以「判定阶段炸了」与「发送阶段炸了」仍然可分
 - **按设计跳过的分支同样喂狗**（locked 不发日常链接、12h 幂等守卫拦下重跑、两条已发满的静默期）：心跳监控的是「调度器跑到没有」，不是「消息发出去没有」
-- **`scheduled` 兜住未捕获异常**：写 cron error + 发失败心跳，否则一次 D1 抖动会让缺席计数、后台健康与外部告警同时失明
+- **每个阶段各自兜住未捕获异常**（`runDaily` 里的 `runPhase`）：判定炸了不连累当天的投递；`scheduled` 外面还有一层，写 cron error + 两个失败心跳。少这一层的话一次 D1 抖动会让缺席计数、后台健康与外部告警同时失明
 - **Workers Cache 已开**（`wrangler.jsonc` 的 `cache.enabled`），所以全局中间件把**所有**响应压成 `Cache-Control: no-store`——开启后任何 200 的 GET 即使不带 Cache-Control 也会被边缘缓存 2 小时，而绕过条件只认 `Set-Cookie` 响应头与 `Authorization` 请求头，**Cookie 不算**，`/admin` 与 `/c/:token` 会被原样吐给下一个请求同一 URL 的人。唯一放行长缓存的是内容寻址过的 `/assets/*`
 - **静态资源内容寻址**：`/assets/<name>?v=<哈希>`，版本号取自 4 个源文件内容的 SHA-256（换行先归一成 LF，否则 `core.autocrlf` 一次 checkout 就换掉版本号），所以能挂 `immutable` 一年。签到链接每天才打开一次，缓存期短于这个间隔等于每天重下一遍 52KB 的 htmx
 - **D1 只对只读查询自动重试**，写入路径靠自带的幂等条件写入 + `writeWithRetry`
@@ -134,7 +135,7 @@
 | 构建 / 本地 | Vite + `@cloudflare/vite-plugin` | 8.3.1 / 1.62.3 | 插件同时接管 dev server 与构建 |
 | 校验 | Zod + `@hono/zod-validator` | 4.6.5 / 0.9.1 | |
 | 认证 | 手写 + `otpauth`（TOTP） | 9.5.2 | 零依赖，见[安全](#安全) |
-| 部署 | wrangler + `wrangler.jsonc` | 4.145.0 | D1 绑定 / custom_domain / 两条 cron / vars |
+| 部署 | wrangler + `wrangler.jsonc` | 4.145.0 | D1 绑定 / custom_domain / 一条 cron / vars |
 | 测试 | Vitest | 5.0.3 | 已接线但**当前跑不起来**，见[开发与构建](#开发与构建) |
 
 不用 ORM（签到 UPDATE 依赖 SQLite 的 `CASE` 与「右侧表达式取旧值」语义，query builder 表达不了）、不用 SPA（签到页必须首屏即终态、无 JS 也能读懂，它可能在别人的手机上被打开）、不用 better-auth（D1 上只能走 drizzleAdapter，会连带引入 Drizzle 与 8 张表）。选型备注见上方表格。
@@ -146,7 +147,7 @@
 ```
 silema/
 ├── src/
-│   ├── index.tsx       # Worker 入口：fetch + scheduled（cron 表达式精确映射到 send / judge）
+│   ├── index.tsx       # Worker 入口：fetch + scheduled（唯一那条 cron 跑 judge → send 两个阶段）
 │   ├── app.tsx         # 全部路由：公共页 / 签到 / 认证 / 后台，SSR + htmx
 │   ├── lib/            # 18 个无 UI 模块：cron · checkin · tokens · channels · send · messages …
 │   ├── routes/         # 6 个页面组件（13 屏界面分布在其中）
@@ -155,7 +156,7 @@ silema/
 │   └── styles.css      # Tailwind v4 @theme +「维生监护仪 · 夜视」组件层 + 全站纯 CSS 动效
 ├── scripts/            # seed-local · migrate · init-owner · hash-password(.cjs/.ps1) · _local
 ├── migrations/         # 0001_init.sql（4 张表）+ 0002_final_second_message.sql
-└── wrangler.jsonc      # D1 绑定 · custom_domain · 两条 cron · vars · Workers Cache
+└── wrangler.jsonc      # D1 绑定 · custom_domain · 一条 cron · vars · Workers Cache
 ```
 
 <details>
@@ -164,12 +165,12 @@ silema/
 ```
 silema/
 ├── src/
-│   ├── index.tsx           # 默认导出 { fetch, scheduled }；scheduled 用 event.cron 精确映射，
+│   ├── index.tsx           # 默认导出 { fetch, scheduled }；scheduled 用 event.cron 校验那唯一一条 cron，
 │   │                       #   对不上的表达式记错误并跳过（不执行任何任务），异常兜住后写 cron error + 失败心跳
 │   ├── app.tsx             # Hono 实例与全部路由；全局中间件下发安全头 + 全站 no-store
 │   ├── globals.d.ts        # 声明构建期注入的 __ASSET_VERSION__
 │   ├── lib/
-│   │   ├── cron.ts         # runSend / runJudge / parseCron / ping：LOCK_AT=3、FINAL_MAX=2、
+│   │   ├── cron.ts         # runDaily（judge → send）/ runSend / runJudge / parseCron / ping：LOCK_AT=3、FINAL_MAX=2、
 │   │   │                   #   12h 幂等守卫、20s 时间预算、并发保护的条件写入
 │   │   ├── checkin.ts      # resolveView / viewOf / performCheckin：确认页三态 + 单 batch 消费令牌并更新 owner
 │   │   ├── tokens.ts       # 256 位随机令牌：rollDailyPrompt（清链 + 铸新）、voidDayLinks（只删已到期的）、
@@ -194,7 +195,7 @@ silema/
 │   │   ├── checkin.tsx     # 确认页三态 + 长按按钮 + 成功态（最高频、最不能错的一屏）
 │   │   ├── login.tsx       # 登录页（口令 + 验证码同格，验证码位可填恢复码）
 │   │   ├── dashboard.tsx   # 仪表盘：状态灯 / 连续天数 / 健康摘要 / 重发今日链接
-│   │   ├── health.tsx      # 健康详情：两条 cron 的时间戳读数与阈值
+│   │   ├── health.tsx      # 健康详情：两个阶段的时间戳读数与阈值
 │   │   ├── recipients.tsx  # 接收人列表 / 编辑 / ChannelFields（服务端渲染的通道字段片段）
 │   │   └── settings.tsx    # 设置（时区）+ 安全页（恢复码 / 注销所有设备 / TOTP 恢复指引）
 │   ├── ui/
@@ -216,7 +217,7 @@ silema/
 │   ├── 0001_init.sql       # owner / checkin_tokens / recipients / rate_limits
 │   └── 0002_final_second_message.sql  # owner.final_second_at
 ├── wrangler.jsonc          # name / main / compatibility_date / nodejs_compat / observability /
-│                           #   cache.enabled / D1 绑定 / custom_domain route / 两条 cron / vars
+│                           #   cache.enabled / D1 绑定 / custom_domain route / 一条 cron / vars
 └── vite.config.ts          # cloudflare() + tailwindcss()、@ 别名、__ASSET_VERSION__ 内容哈希
 ```
 
@@ -265,8 +266,9 @@ npm run dev              # http://localhost:5173
 本地手动触发 cron：
 
 ```bash
-curl -X POST "http://localhost:5173/__cron?job=send&force=1" -H "X-Cron-Secret: local-cron-secret"
-# 或用平台自带的路由（走真实的 scheduled handler 与表达式映射）：
+curl -X POST "http://localhost:5173/__cron?job=daily&force=1" -H "X-Cron-Secret: local-cron-secret"  # 判定 + 发送（= 线上那次运行）
+curl -X POST "http://localhost:5173/__cron?job=send&force=1"  -H "X-Cron-Secret: local-cron-secret"  # 只跑单个阶段
+# 或用平台自带的路由（走真实的 scheduled handler 与表达式校验）：
 curl "http://localhost:5173/cdn-cgi/local/scheduled?cron=0+4+*+*+*"
 ```
 
@@ -295,7 +297,7 @@ npx tsc --noEmit         # 类型检查（package.json 里没有对应 script）
 | GET | `/api/status` | 公开状态 JSON：`state` / `streak` / `missedStreak` / `checkedToday` / `lastCheckinDate` / `timezone`；owner 未初始化返回 503 `not_initialized` |
 | GET | `/c/:token` | 签到确认页（只渲染，不改状态）；按 IP 限流 60 次/小时 |
 | POST | `/c/:token/do` | **全站唯一签到入口**；htmx 请求回片段、其余回整页；按 IP 限流 30 次/小时 |
-| POST | `/__cron?job=send\|judge` | 手动触发 cron，需 `X-Cron-Secret` 头，`&force=1` 跳过 12h 幂等守卫（`send` 复用当日已存在的令牌，不重新清链） |
+| POST | `/__cron?job=daily\|send\|judge` | 手动触发 cron，需 `X-Cron-Secret` 头；缺省 `job=daily`（= 线上那次完整运行，判定 → 发送），`send` / `judge` 单跑一个阶段。`&force=1` 跳过 12h 幂等守卫（`send` 复用当日已存在的令牌，不重新清链） |
 | GET | `/assets/:name` | htmx + 三个同源小脚本；`?v=<内容哈希>`，`Cache-Control: public, max-age=31536000, immutable` |
 
 公开响应**不含任何接收人信息、也不给精确时间戳**，否则任何人都能推算出触发时刻。
@@ -317,7 +319,7 @@ npx tsc --noEmit         # 类型检查（package.json 里没有对应 script）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/admin` | 仪表盘 |
-| GET | `/admin/health` | 健康详情（两条 cron 的时间戳读数与阈值） |
+| GET | `/admin/health` | 健康详情（两个阶段的时间戳读数与阈值） |
 | GET | `/admin/settings` | 设置（时区） |
 | GET | `/admin/security` | 恢复码 / 会话到期 / TOTP 恢复指引 |
 | GET | `/admin/recipients`、`/admin/recipients/new`、`/admin/recipients/:id` | 接收人列表 / 新增 / 编辑（凭据服务端脱敏） |
@@ -377,7 +379,7 @@ Secret 一律通过 `.secrets.json` + `wrangler deploy --secrets-file` 写入（
 | `send` 心跳 / 后台健康 | `now - last_send_at > 13h` | 标红 + 失败心跳（locked 态豁免） |
 | `judge` 心跳 / 后台健康 | `now - last_judge_at > 25h` | 标红 + 失败心跳 |
 | 单通道发送超时 | 5s | 该通道失败，即时重试 ≤3 次（间隔 400ms 递增） |
-| 整个 cron 时间预算 | 20s | 超预算全部按失败计（Workers 墙钟/子请求上限） |
+| 单次并发投递（fanout）时间预算 | 20s | 超预算全部按失败计（cron invocation 的墙钟上限是 15 分钟，不是瓶颈） |
 | 名单变更告知预算 | 6s | 单通道不重试，只把 `ok\|partial\|fail` 回给后台横幅 |
 
 </details>
@@ -413,6 +415,20 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"   
 npm run deploy -- --secrets-file .secrets.json   # 代码 + 密钥一次上传，只产生一个版本
 node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP，屏幕上打印 otpauth:// 内容
 ```
+
+<details>
+<summary><b>2026-10-02：两条 cron 合并成一条，部署时刻要挑一下</b></summary>
+
+`wrangler deploy` 会用 `triggers.crons` **整体替换**线上触发器，所以部署完那条 `0 16 * * *` 自己就没了，不用去控制台删。
+
+要挑的是部署时刻，因为 `last_judge_at` 还停在旧的午夜节奏上：
+
+- **在北京 12:00 之后部署**（推荐）：当天的 send 已经跑过、24:00 的旧判定不会再跑，次日 12:00 的第一次合并运行距上次判定 36h，正常执行；判定窗口一次性拉长到 36h，期间的签到都算数，节奏从此对齐到 12:00。
+- **在北京 00:00–12:00 之间部署**：当天 12:00 的判定窗口只有 12 小时，而这段时间里当日链接还没铸出来（发送排在判定之后），所以会记一次**假缺席**，当天那条消息改用「未确认提醒 1/2」文案，同时 cron 健康会写下 `[judge] 本周期没有发出过签到链接，判定结果不可信`。当天照常签到即可自愈（次日判定看到签到就把 `missed_streak` 归零），代价只是收到一条语气不对的消息。
+
+两种情况都不会误锁死：锁死要连续 3 次缺席，而假缺席最多贡献 1 次。
+
+</details>
 
 `.secrets.json` **留在本地别提交也别删**（`.gitignore` 已经收了）：它是后续改密钥的唯一底本 —— 值一旦写进 Worker 就再也读不回来，没有这个文件你只能全部重新生成。
 
@@ -519,7 +535,7 @@ read -rs p && printf '%s\n%s\n' "$p" "$p" | node scripts/hash-password.cjs
 
 - **无签到流水**：连续天数与「本周期是否已签」由 `last_checkin_at >= last_judge_at` + `streak` 推导，系统不提供签到日历/历史。
 - **无投递记录**：发送即时完成、不落日志；失败可见性走 cron 健康 + 心跳。唯一例外是两个 `final_*_at` 送达时间戳——必须有它们才能区分「还欠一条」和「已发满两条」。
-- 巡检状态直接存 owner 行（`last_cron_*`），只有一份槽位，所以 error 文本带 `[send]` / `[judge]` 前缀，且后台健康判定不依赖它。
+- 巡检状态直接存 owner 行（`last_cron_*`），只有一份槽位：一次运行里判定与发送的错误**合并**写进这一格（文本仍带 `[send]` / `[judge]` 前缀标明来源），下一天的运行又整格覆盖，所以后台健康判定不依赖它。
 - 签到的 owner 更新是一个 D1 batch 里的纯 SQL（SQLite 的 UPDATE 右侧表达式一律取旧值，赋值顺序无关），所以 `streak` / `last_judge_at` 的推进不需要读-改-写。
 
 ## 已知取舍
@@ -530,7 +546,8 @@ read -rs p && printf '%s\n%s\n' "$p" "$p" | node scripts/hash-password.cjs
 | 签到只能走当日链接 | 链接没送到就是当天签不了，可能误锁死；补偿只有重发 |
 | 最终消息最多两条，之后彻底静默 | 误锁死时紧急联系人只会被打扰两次，但错过窗口的人只能靠那条 7 天恢复链接自救 |
 | 锁死后只有恢复链接能自救 | 撤销不了已发出的最终消息；链接过期即无从签到，只能重建库 |
-| 只有两条固定 cron | 非北京时区的用户看到的是本地 12:00/24:00 之外的时刻 |
+| 只有一条固定 cron | 非北京时区的用户看到的是本地 12:00 之外的时刻 |
+| 判定与发送挤在同一次 cron invocation | Free 计划每次 invocation 只有 **10ms CPU**（等 D1 / HTTP 不计入），两个阶段现在共用这一份；cron trigger 额度是账号级 5 条，所以宁可挤 |
 | 无签到历史 / 无投递记录 | 排查只能靠 cron 健康、心跳与 owner 行时间戳 |
 | `recipients.config_json` 明文存 D1 | 通道凭据的机密性依赖 D1 的账号级访问控制；GET 一律脱敏 |
 | 没有自动化测试 | 唯一门禁是 `npx tsc --noEmit`；`npm test` 与 cloudflare vite 插件冲突（见[开发与构建](#开发与构建)） |

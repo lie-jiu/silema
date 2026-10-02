@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { performCheckin, resolveView, viewOf, type CheckinView } from "./lib/checkin";
 import { isChannelType, mergeConfig, unsafeWebhookUrl, validateConfig, type ChannelType } from "./lib/channels";
 import { configsDiffer, notifyContactChange, targetBrief, type NoticeOutcome } from "./lib/contact-change";
-import { runJudge, runSend } from "./lib/cron";
+import { runDaily, runJudge, runSend } from "./lib/cron";
 import { checkedThisCycle, getOwner, writeWithRetry, type OwnerRow } from "./lib/db";
 import { healthOf } from "./lib/health";
 import { render } from "./lib/messages";
@@ -216,10 +216,16 @@ app.post("/__cron", async (c) => {
   const rl = await hitRateLimit(c.env.DB, `cron:${clientIp(c)}`, 10, 900_000);
   if (!rl.allowed) return c.text(`too many requests，请 ${rl.retryAfterMinutes} 分钟后再试`, 429);
 
-  const job = c.req.query("job");
+  // daily = 线上那条 cron 跑的完整流程（判定 → 发送）；send / judge 保留给单阶段排查与补跑
+  const job = c.req.query("job") ?? "daily";
   const force = c.req.query("force") === "1";
-  if (job !== "send" && job !== "judge") return c.text("job 必须是 send 或 judge", 400);
-  const res = job === "send" ? await runSend(c.env, { force }) : await runJudge(c.env, { force });
+  if (job !== "daily" && job !== "send" && job !== "judge") return c.text("job 必须是 daily / send / judge", 400);
+  const res =
+    job === "daily"
+      ? await runDaily(c.env, { force })
+      : job === "send"
+        ? await runSend(c.env, { force })
+        : await runJudge(c.env, { force });
   return c.json(res);
 });
 

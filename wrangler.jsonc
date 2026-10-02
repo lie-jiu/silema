@@ -26,8 +26,9 @@
     { "pattern": "slm.liejiu.top", "custom_domain": true }
   ],
   "triggers": {
-    // 北京 12:00 唯一的发送窗口 / 北京 24:00 只判定不作投递（cron 表达式为 UTC）
-    "crons": ["0 4 * * *", "0 16 * * *"]
+    // 北京 12:00（cron 表达式为 UTC）唯一一次运行：先判定上一周期，再发出今天那唯一的一条。
+    // 判定刻意不单独占一条 cron——Free 计划的 cron trigger 是**账号级 5 条**。
+    "crons": ["0 4 * * *"]
   },
   "vars": {
     "SITE_URL": "https://slm.liejiu.top",

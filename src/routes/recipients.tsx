@@ -286,7 +286,7 @@ export function RecipientEditPage(props: {
 
           <Card>
             <div class="micro mb-2">事件订阅</div>
-            <Switch name="onPrompt" checked={props.values.onPrompt} label="日常提醒" desc="每天 12:00 唯一的那条消息；24:00 判定为缺席后，次日这条自动换成未签到提醒" />
+            <Switch name="onPrompt" checked={props.values.onPrompt} label="日常提醒" desc="每天 12:00 唯一的那条消息；上一次判定为缺席时，这条自动换成未签到提醒" />
             <Switch name="onFinal" checked={props.values.onFinal} label="紧急联系人" desc="锁死时接收最终消息；名单或接收方式变动时会告知变更前的所有人" />
           </Card>
 

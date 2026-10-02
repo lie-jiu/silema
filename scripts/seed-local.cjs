@@ -51,7 +51,7 @@ const base = {
   final_sent_at: null,
   final_second_at: null,
   last_send_at: bj(0, 12, 0),
-  last_judge_at: bj(0, 0, 0),
+  last_judge_at: bj(0, 12, 0),
   last_cron_at: bj(0, 12, 0),
   last_cron_status: "ok",
   last_cron_error: null,
@@ -62,23 +62,25 @@ const scenes = {
   healthy: base,
   miss1: { ...base, streak: 0, missed_streak: 1, last_checkin_at: bj(-1, 12, 6) },
   miss2: { ...base, streak: 0, missed_streak: 2, last_checkin_at: bj(-2, 12, 6) },
-  // 锁死发生在缺席第 3 天的 24:00，即「今天 00:00」；上次确认因此落在 4 天前
+  // 锁死发生在缺席第 3 天后的那个 12:00，第一条最终消息由同一次运行立刻投出（两者同刻）；
+  // 上次确认因此落在 4 天前
   locked: {
     ...base,
     state: "locked",
     streak: 0,
     missed_streak: 3,
     last_checkin_at: bj(-4, 12, 6),
-    locked_at: bj(0, 0, 0),
-    final_sent_at: bj(0, 0, 5),
+    locked_at: bj(0, 12, 0),
+    final_sent_at: bj(0, 12, 0),
   },
+  // 锁死与投递同刻，所以「锁死了但一条都没送达」只可能是那次投递全通道失败
   "locked-pending": {
     ...base,
     state: "locked",
     streak: 0,
     missed_streak: 3,
     last_checkin_at: bj(-4, 12, 6),
-    locked_at: bj(0, 0, 0),
+    locked_at: bj(0, 12, 0),
     final_sent_at: null,
   },
   "locked-silent": {
@@ -86,9 +88,9 @@ const scenes = {
     state: "locked",
     streak: 0,
     missed_streak: 3,
-    last_checkin_at: bj(-4, 12, 6),
-    locked_at: bj(0, 0, 0),
-    final_sent_at: bj(0, 0, 5),
+    last_checkin_at: bj(-5, 12, 6),
+    locked_at: bj(-1, 12, 0),
+    final_sent_at: bj(-1, 12, 0),
     final_second_at: bj(0, 12, 0),
   },
   sendfail: {
@@ -210,7 +212,8 @@ ${tokenRows.map((r) => `  ${pad(r.label)}http://localhost:5173/c/${r.token}`).jo
   ${pad("链接已失效（不存在的令牌）")}http://localhost:5173/c/deadbeefnotatoken
 
 假投递收件箱  http://localhost:5173/dev/outbox   （MOCK_SEND=1，所有发送只记不发）
-手动触发 cron curl -X POST "http://localhost:5173/__cron?job=send&force=1" -H "X-Cron-Secret: ${cronSecret}"
+手动触发 cron curl -X POST "http://localhost:5173/__cron?job=daily&force=1" -H "X-Cron-Secret: ${cronSecret}"
+              job=daily 是线上那次完整运行（判定 → 发送）；也可单跑 job=send / job=judge
 换场景        node scripts/seed-local.cjs --scenario=locked   （可选：${SCENARIOS.join(" | ")}）
 ============================================================
 从手机访问：npm run dev -- --host，再用日志里的 Network 地址，并把 .dev.vars 的 SITE_URL 改成同一地址。
