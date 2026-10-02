@@ -201,21 +201,21 @@ export function Button(props: {
   );
 }
 
-/** 缺席进度：4 段刻度，第 3 段起转红（最后警告）。 */
-export function MissedDots({ missed, locked }: { missed: number; locked?: boolean }): ReturnType<FC> {
+/** 缺席进度：每段一天，最后一段（锁死阈值）转红。段数由调用方传入 LOCK_AT，避免前后端各写一个魔法数。 */
+export function MissedDots({ missed, total, locked }: { missed: number; total: number; locked?: boolean }): ReturnType<FC> {
   return (
     <div class="flex items-center gap-3">
-      <div class="flex gap-1.5 flex-1" role="img" aria-label={`连续缺席 ${missed} 天，满 4 天锁死`}>
-        {[1, 2, 3, 4].map((i) => (
+      <div class="flex gap-1.5 flex-1" role="img" aria-label={`连续缺席 ${missed} 天，满 ${total} 天锁死`}>
+        {Array.from({ length: total }, (_, i) => i + 1).map((i) => (
           <span
             key={i}
             class={`h-1.5 flex-1 rounded-full transition-colors ${
-              i > missed ? "bg-ink/10" : i >= 3 ? "bg-danger" : "bg-warn"
+              i > missed ? "bg-ink/10" : i >= total ? "bg-danger" : "bg-warn"
             }`}
           ></span>
         ))}
       </div>
-      <span class="readout text-label opacity-55 whitespace-nowrap">{missed}/4</span>
+      <span class="readout text-label opacity-55 whitespace-nowrap">{missed}/{total}</span>
       {locked ? <span class="micro text-danger">LOCKED</span> : null}
     </div>
   );
@@ -334,6 +334,8 @@ export function ConfirmDialog(props: {
       <form method="dialog" class="panel p-5">
         <h3 class="text-sub font-semibold tracking-tight">{props.title}</h3>
         <div class="mt-2 text-body opacity-75 leading-relaxed">{props.body}</div>
+        {/* 确认后 POST 失败时由 dialog.js 填这里并保持对话框打开，否则用户只会觉得「点了没反应」 */}
+        <div data-error hidden class="mt-3 text-label text-danger leading-relaxed"></div>
         <div class="mt-6 flex gap-2.5">
           <button value="cancel" class="btn btn-flat flex-1">
             取消

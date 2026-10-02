@@ -1,6 +1,7 @@
 import type { Child } from "hono/jsx";
 import type { FC } from "hono/jsx";
 import { checkedThisCycle, type OwnerRow } from "../lib/db";
+import { LOCK_AT } from "../lib/cron";
 import type { Health } from "../lib/health";
 import { fmtClock, fmtTimeOnly } from "../lib/time";
 import { Card, ConfirmDialog, Label, Led, MissedDots, Notice, OpenDialog, Skeleton, Stat } from "../ui/kit";
@@ -70,13 +71,13 @@ export function DashboardPage(props: {
           </div>
           <div class="h-px bg-gradient-to-r from-transparent via-ink/10 to-transparent"></div>
           <div class="px-5 py-4 flex flex-col gap-3">
-            <MissedDots missed={o.missed_streak} locked={locked} />
+            <MissedDots missed={o.missed_streak} total={LOCK_AT} locked={locked} />
             <div class="text-label opacity-55 leading-relaxed">
               {locked
-                ? "锁死已触发，任意一条签到链接被点开即解除。"
-                : o.missed_streak >= 3
-                  ? "最后警告：明天不确认就会通知紧急联系人。"
-                  : "连续缺席满 4 天，系统向紧急联系人发出最终消息。"}
+                ? "锁死已触发，凭最终消息里的恢复链接签到即解除。"
+                : o.missed_streak >= LOCK_AT - 1
+                  ? "最后警告：今天 24:00 不确认就会通知紧急联系人。"
+                  : `连续缺席满 ${LOCK_AT} 天，系统向紧急联系人发出最终消息。`}
             </div>
           </div>
         </Card>
@@ -89,13 +90,21 @@ export function DashboardPage(props: {
             <div class="text-body leading-relaxed">
               {o.final_sent_at == null ? (
                 <>
-                  最终消息<span class="text-danger font-semibold">尚未送达</span>，系统每天 24:00 自动重试，直到至少一个
-                  「紧急联系人」通道成功。
+                  最终消息<span class="text-danger font-semibold">一条都没有送达</span>，系统每天 12:00 自动重试，
+                  直到至少一个「紧急联系人」通道成功。
+                </>
+              ) : o.final_second_at == null ? (
+                <>
+                  锁定于 <span class="readout">{fmtClock(o.timezone, o.locked_at ?? 0)}</span>，第一条已于{" "}
+                  <span class="readout">{fmtClock(o.timezone, o.final_sent_at)}</span> 发出，不可撤回。
+                  次日 12:00 还会再发最后一条，之后系统彻底静默。
                 </>
               ) : (
                 <>
-                  锁定于 <span class="readout">{fmtClock(o.timezone, o.locked_at ?? 0)}</span>，最终消息已于{" "}
-                  <span class="readout">{fmtClock(o.timezone, o.final_sent_at)}</span> 发出，不可撤回。
+                  锁定于 <span class="readout">{fmtClock(o.timezone, o.locked_at ?? 0)}</span>，两条最终消息已分别于{" "}
+                  <span class="readout">{fmtClock(o.timezone, o.final_sent_at)}</span> 和{" "}
+                  <span class="readout">{fmtClock(o.timezone, o.final_second_at)}</span> 发出，不可撤回。
+                  <span class="text-danger">此后系统不再发送任何消息</span>，只能凭消息里的恢复链接签到解除。
                 </>
               )}
             </div>

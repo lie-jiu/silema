@@ -11,6 +11,7 @@ export type OwnerRow = {
   last_checkin_at: number | null;
   locked_at: number | null;
   final_sent_at: number | null;
+  final_second_at: number | null;
   last_send_at: number | null;
   last_judge_at: number;
   last_cron_at: number | null;

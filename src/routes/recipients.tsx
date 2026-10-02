@@ -244,11 +244,11 @@ export function RecipientEditPage(props: {
             <div class="micro mb-3">通知通道</div>
             <div class="grid grid-cols-2 gap-2 mb-4">
               {CHANNEL_TYPES.map((t) => (
+                /* 高亮必须由 :checked 驱动，不能由服务端写死的 class 驱动：
+                   点选只会改原生 radio 的状态，class 不重渲染，选中框会留在旧卡片上。 */
                 <label
                   key={t}
-                  class={`flex items-center gap-2 px-3 py-2.5 rounded-field border text-body cursor-pointer min-h-12 transition-colors ${
-                    t === props.type ? "border-primary bg-primary/6 text-primary-ink font-semibold shadow-brand" : "border-ink/12 bg-panel/60 opacity-75"
-                  }`}
+                  class="flex items-center gap-2 px-3 py-2.5 rounded-field border border-ink/12 bg-panel/60 opacity-75 text-body cursor-pointer min-h-12 transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/6 has-[:checked]:text-primary-ink has-[:checked]:font-semibold has-[:checked]:shadow-brand has-[:checked]:opacity-100"
                 >
                   <input
                     type="radio"

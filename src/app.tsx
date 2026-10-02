@@ -12,7 +12,7 @@ import { render } from "./lib/messages";
 import { clearRateLimit, hitRateLimit } from "./lib/rate-limit";
 import { configOf, countFinal, deleteRecipient, finalRecipients, getRecipient, insertRecipient, listRecipients, updateRecipient } from "./lib/recipients";
 import { deliver, getOutbox, isMock, type Env } from "./lib/send";
-import { missingSecrets, requireAuth, securityHeaders, wantsHtmx } from "./lib/security";
+import { fragStatus, missingSecrets, requireAuth, securityHeaders, wantsHtmx } from "./lib/security";
 import { clearSessionCookie, issueSession, readSession, SESSION_COOKIE, sessionCookie } from "./lib/session";
 import { verifyPassword } from "./lib/password";
 import { backupCodeCount, generateBackupCodes, hashBackupCodes, matchBackupCode, removeCode } from "./lib/backup-codes";
@@ -133,7 +133,18 @@ app.post("/c/:token/do", async (c) => {
   if (!res.ok) {
     const view = await resolveView(c.env.DB, raw, now);
     if (res.reason === "used") return respond(c, { view }, now, raw);
-    return respond(c, { error: "这条链接只在当天有效，请等明天 12:00 的新链接，或去后台重发" }, now, raw);
+    // 锁定期既不发日常链接也不允许重发，所以「等明天的新链接」这句在 locked 态是假的
+    return respond(
+      c,
+      {
+        error:
+          view.owner.state === "locked"
+            ? "系统已锁死，锁定期不再发出任何链接，而这条恢复链接已经过期"
+            : "这条链接只在当天有效，请等明天 12:00 的新链接，或去后台重发",
+      },
+      now,
+      raw,
+    );
   }
   if (res.kind === "test") {
     const view = await resolveView(c.env.DB, raw, now);
@@ -160,7 +171,7 @@ async function respond(
       fragment={wantsHtmx(c)}
     />
   );
-  return c.html(page, extra.error ? 400 : 200);
+  return c.html(page, fragStatus(c, extra.error ? 400 : 200));
 }
 
 async function getOwnerOrBlank(db: D1Database): Promise<OwnerRow> {
@@ -179,6 +190,7 @@ async function getOwnerOrBlank(db: D1Database): Promise<OwnerRow> {
     last_checkin_at: null,
     locked_at: null,
     final_sent_at: null,
+    final_second_at: null,
     last_send_at: null,
     last_judge_at: Date.now(),
     last_cron_at: null,
@@ -278,7 +290,7 @@ app.post("/api/auth/login", async (c) => {
 
   function fail(cc: typeof c, message: string, echo: { username?: string } = {}) {
     const page = <LoginPage error={message} username={echo.username} next={next} fragment={wantsHtmx(cc)} />;
-    return cc.html(page, 401, { "Cache-Control": "no-store" });
+    return cc.html(page, fragStatus(cc, 401), { "Cache-Control": "no-store" });
   }
 });
 
@@ -430,13 +442,16 @@ app.post("/api/settings", async (c) => {
   const body = await c.req.formData();
   const tz = String(body.get("timezone") ?? "");
   if (!isValidTimeZone(tz)) {
-    return c.html(<span class="text-danger">时区名称无效，已保留原值</span>, 400);
+    return c.html(<span class="text-danger">时区名称无效，已保留原值</span>, fragStatus(c, 400));
   }
   await c.env.DB.prepare("UPDATE owner SET timezone = ? WHERE id = 1").bind(tz).run();
   return c.html(<span class="text-ok">已保存为 {tz}</span>);
 });
 
 app.post("/api/cron/resend", async (c) => {
+  // 锁死后这个动作的语义不成立：locked 态的 runSend 发的是第二条最终消息，不是当日链接。
+  const o = await getOwner(c.env.DB);
+  if (o?.state === "locked") return c.text("已锁死，锁定期不重发日常链接", 409);
   const res = await runSend(c.env, { force: true });
   if (!res.ran) return c.text(res.skipped ?? "未执行", 409);
   if (res.error) return c.text(res.detail, 502);
@@ -697,7 +712,7 @@ app.post("/api/recipients/:id/test", async (c) => {
         <pre class="mt-1 font-mono text-label whitespace-pre-wrap break-all select-all">{res.detail}</pre>
       </Notice>
     ),
-    res.ok ? 200 : 502,
+    fragStatus(c, res.ok ? 200 : 502),
   );
 });
 

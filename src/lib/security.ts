@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 import { getOwner, type OwnerRow } from "./db";
 import { getCookie } from "hono/cookie";
@@ -86,4 +87,16 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env; Variables: Aut
 
 export function wantsHtmx(c: Context): boolean {
   return c.req.header("HX-Request") === "true";
+}
+
+/**
+ * 渲染型片段响应（要换进 DOM 的那类）。
+ *
+ * htmx 2 的默认 `responseHandling` 是 `{ code: '[45]..', swap: false, error: true }`
+ * —— **任何 4xx/5xx 响应都不会被换进页面**，只触发 htmx:responseError。所以「登录失败/校验不通过」
+ * 这类带错误文案的片段如果照实回 401/400/502，用户看到的效果就是「点了没反应、也没提示」。
+ * htmx 请求一律降级成 200（错误内容照旧渲染），非 htmx 客户端仍然拿真实状态码。
+ */
+export function fragStatus(c: Context, status: ContentfulStatusCode): ContentfulStatusCode {
+  return wantsHtmx(c) ? 200 : status;
 }

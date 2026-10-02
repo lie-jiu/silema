@@ -2,7 +2,7 @@
 
 > 每天只有一条链接能证明你还活着。
 
-Cloudflare Workers 上的每日确认系统（dead-man's switch）：每天 12:00 向通道发一条**当日一次性**签到链接，连续缺席到第 4 天就向紧急联系人发出预设的最终消息。任意一次签到即恢复正常。
+Cloudflare Workers 上的每日确认系统（dead-man's switch）：每天 12:00 向通道发一条**当日一次性**签到链接，连续缺席到第 3 天就向紧急联系人发出预设的最终消息，次日 12:00 再发最后一条，之后**彻底静默**。只有 owner 再次签到才能恢复。
 
 线上地址 <https://slm.liejiu.top>。规格文档：
 
@@ -15,20 +15,25 @@ Cloudflare Workers 上的每日确认系统（dead-man's switch）：每天 12:0
 
 | 时刻（北京） | 任务 | 做什么 |
 |---|---|---|
-| 12:00 | `send` | 物理删除全部旧链接 → 铸造当日链接 → **无条件**发给所有「日常提醒」通道（当天已签到也发） |
-| 24:00 | `judge` | 本周期签到过 → 缺席计数归零；没签 → 缺席 +1，第 1–3 天各发一次未签到提醒 |
-| 缺席第 4 天 | `judge` | **锁死**：向所有「紧急联系人」通道发最终消息，附一条 7 天有效的恢复链接 |
-| 任意签到 | — | 立即恢复 `normal`、缺席归零。最终消息一经发出**不可撤回** |
+| 12:00 | `send` | normal 态：物理删除全部旧链接 → 铸造当日链接 → **无条件**发给所有「日常提醒」通道（当天已签到也发）。locked 态：发第二条、也是最后一条最终消息 |
+| 24:00 | `judge` | 本周期签到过 → 缺席计数归零；没签 → 缺席 +1，第 1–2 天各发一次未签到提醒 |
+| 缺席第 3 天 24:00 | `judge` | **锁死**：向所有「紧急联系人」通道发第一条最终消息，附一条 7 天有效的恢复链接 |
+| 缺席第 4 天 12:00 | `send` | 发第二条最终消息。**发满两条后系统不再发送任何消息** |
+| 之后 | 两个任务 | 只推进时间戳、照常喂心跳，一条消息都不发 |
+| 再次签到 | — | 立即恢复 `normal`、缺席归零，同时撤销还没发出的那一条。已发出的最终消息**不可撤回** |
 
 两条固定 cron 写在 `wrangler.jsonc` 的 `triggers.crons`（UTC `0 4` / `0 16`）。改时间 = 改这里并重新部署，后台没有签到时限类设置。
+
+**「失败不消耗名额」**：名额按**送达**计。第一条整条失败时，次日 12:00 那次算补发而不是第二条，之后每天 12:00 继续重试，直到至少一个通道成功；成功后第二天 12:00 才发最后一条。所以紧急联系人最多收到两条，而通道临时故障不会让消息永久丢失。
 
 ## ⚠️ 使用前必须知道的边界
 
 - **全站共用一条链接**，任何持有者都能替你签到续命。**不要把每日链接发到共享群 / 公共频道**，否则这个开关提供的保证为零。
 - **后台没有签到按钮，也不存在 `POST /api/checkin`**。这是刻意的：「已签到」必须等价于「今天真的收到并点开了链接」，不能退化成登录后台点一下就算活着。
 - `GET /c/:token` 只渲染确认页，长按确认才 `POST /c/:token/do`。邮件网关的自动抓取与 Safe Links 不会替你续命。
-- **链接没送到 = 当天无法签到**，连吃 3 天提醒后第 4 天会误锁死。唯一的补救是后台「重发今日链接」（`POST /api/cron/resend`），它重发的仍是同一条当日令牌，不算签到。
-- 不落签到流水、不落投递记录（唯一例外是 `owner.final_sent_at`，它驱动锁死期的逐日重发）。**没有签到日历和趋势图**，这是刻意的存储面收敛。
+- **链接没送到 = 当天无法签到**，连吃 2 天提醒后第 3 天会误锁死。唯一的补救是后台「重发今日链接」（`POST /api/cron/resend`），它重发的仍是同一条当日令牌，不算签到。
+- **锁死后系统不再主动给你任何链接**：日常链接在 locked 态一律不发，「重发今日链接」也被拒。恢复只能点最终消息里那条 7 天有效的链接——**过期即无从签到**，这是刻意的：过了这个窗口就认为你确实出事了。
+- 不落签到流水、不落投递记录（唯一例外是 `owner.final_sent_at` / `final_second_at` 这两个送达时间戳，它们决定最终消息还欠几条）。**没有签到日历和趋势图**，这是刻意的存储面收敛。
 - `recipients.config_json` 明文存 D1（除 `email` 外的通道凭据只能按接收人存）。GET 一律脱敏，机密性依赖 D1 的账号级访问控制。
 
 ---
@@ -53,9 +58,10 @@ npm run dev              # http://localhost:5173
 |---|---|
 | `today` | 今天还没签（默认） |
 | `healthy` | 今天已签，连续 12 天 |
-| `miss1` / `miss2` / `miss3` | 连续缺席 1 / 2 / 3 天（第 3 天即最后警告） |
-| `locked` | 已锁死且最终消息已送达 |
-| `locked-pending` | 已锁死但最终消息发送失败，每日重试 |
+| `miss1` / `miss2` | 连续缺席 1 / 2 天（第 2 天即最后警告） |
+| `locked` | 已锁死，第一条已送达，等次日 12:00 的最后一条 |
+| `locked-pending` | 已锁死但一条都没送达，每日 12:00 重试 |
+| `locked-silent` | 两条已发满，系统彻底静默 |
 | `sendfail` | 发送全通道失败，后台标红 |
 | `fresh` | 全新库，没有任何接收人与链接 |
 
@@ -75,22 +81,17 @@ curl "http://localhost:5173/cdn-cgi/local/scheduled?cron=0+4+*+*+*"
 
 ## 部署到 Cloudflare
 
-`wrangler.jsonc` 里有两处**必须在部署前改**：
-
-1. `d1_databases[0].database_id` 现在是占位值 `"silema-local"`，只有本地开发能用。
-2. 没有 `routes` 条目 —— 部署完不会自动接管 `slm.liejiu.top`。
+本仓库已经按 `slm.liejiu.top` 配好了（生产 D1 的 `database_id` 与 `routes` 都在 `wrangler.jsonc` 里）。换成你自己的域名/库时改这两处即可：
 
 ```bash
 npx wrangler login
 npx wrangler d1 create silema                    # 把返回的 database_id 填进 wrangler.jsonc
-npx wrangler d1 migrations apply silema --remote # 应用 migrations/0001_init.sql
-
-# 生成口令哈希与两把随机密钥
-node -e "require('./scripts/_local.cjs').hashPassword(process.argv[1]).then(console.log)" '你的管理员口令'
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+npx wrangler d1 migrations apply silema --remote # 按序应用 migrations/*.sql
+.\scripts\hash-password.ps1                        # 问两次口令 → 打印 pbkdf2$100000$… 哈希
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"   # 随机密钥来两把
 ```
 
-把 6 个密钥写进一个 **gitignored** 的 `.secrets.json`（格式同 `wrangler secret bulk`，JSON 或 `.env` 都行）：
+把 5～6 个密钥写进 **gitignored** 的 `.secrets.json`（格式同 `wrangler secret bulk`，JSON 或 `.env` 都行）：
 
 ```json
 {
@@ -105,16 +106,54 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ```bash
 npm run deploy -- --secrets-file .secrets.json   # 代码 + 密钥一次上传，只产生一个版本
-rm .secrets.json                                 # 用完就删；值已经加密存在 Worker 上，读不回来
-
-node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP，屏幕上会打印 otpauth:// 内容
+node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP，屏幕上打印 otpauth:// 内容
 ```
 
-关于密钥的几条官方语义（`workers/configuration/secrets`）：
+`.secrets.json` **留在本地别提交也别删**（`.gitignore` 已经收了）：它是后续改密钥的唯一底本 —— 值一旦写进 Worker 就再也读不回来，没有这个文件你只能全部重新生成。
+
+### 改管理员口令
+
+Windows 上用 PowerShell 脚本（不依赖 Node 的交互输入）：
+
+```powershell
+.\scripts\hash-password.ps1            # 问两次（明文可见）→ 打印哈希并复制到剪贴板
+.\scripts\hash-password.ps1 -Hidden    # 改成隐藏输入（SecureString）
+.\scripts\hash-password.ps1 -Apply     # 顺手写进 .secrets.json 并重新部署，一步生效
+.\scripts\hash-password.ps1 -Key EMAIL_FROM -Apply
+```
+
+末尾会等你按回车才关窗（`-NoPause` 跳过），出错也是打红字而不是闪退 —— 双击运行最容易什么都看不见。**哈希会占用剪贴板**（这正是它的方便之处，但跑之前重要的剪贴板内容先挪走，或者事后按 `Win + V` 从历史找回）。口令不进命令行参数，用完把 `$first` / `$feed` 变量清掉。
+
+非 Windows 直接把两行口令喂给 Node 脚本：
+
+```bash
+read -rs p && printf '%s\n%s\n' "$p" "$p" | node scripts/hash-password.cjs
+```
+
+`-Apply` / `--apply` 会**立即重新部署线上 Worker**（Node 侧还得多带 `--yes`）。新口令立刻生效、旧口令作废；已登录的会话不会掉（cookie 由 `SESSION_SECRET` 签名），要吊销所有设备就去后台「安全 → 注销所有设备」。它不校验旧口令，忘了也能这么救回来。口令**绝不走命令行参数** —— argv 会进 shell 历史与系统进程列表。
+
+哈希必须由服务端 `verifyPassword` 能认的算法产出（PBKDF2-**SHA256**、10 万轮、base64url 无填充），所以这两个脚本都复用 `scripts/_local.cjs` 里那份实现：Windows PowerShell 5.1 自带的 `Rfc2898DeriveBytes` 只有 SHA-1，自己手写很容易做成「哈希看着对、登录却 401」。
+
+### 旋转机器生成的密钥
+
+```powershell
+.\scripts\hash-password.ps1 -Rotate -Key SESSION_SECRET -Apply
+.\scripts\hash-password.ps1 -Rotate -Key CRON_SECRET   -Apply
+```
+
+随机 32 字节 hex → 写进 `.secrets.json` → 重新部署，全程不用你输入或复制任何东西。
+
+- **`SESSION_SECRET`** 一旋转，所有已登录会话立刻失效（怀疑 cookie 泄露时这就是那把刀；后台的「注销所有设备」走 `session_epoch`，效果相同且不用部署）。
+- **`CRON_SECRET`** 旋转后手动触发 `/__cron` 要用新值；本地 `.dev.vars` 里那个只是开发用的，两者互不影响。
+- `-Rotate` 对 `ADMIN_PASSWORD_HASH` 会直接拒绝 —— 口令必须由你自己定，随机出来的口令没人记得住。
+
+`wrangler secret put` 在本项目上会被平台拒绝（见上），所以旋转只能走「写 `.secrets.json` + 重新部署」这条路。新值全球传播要几秒钟，刚部署完立刻拿旧值试可能还是通的，别据此判断没生效。
+
+关于密钥的几条语义（官方 `workers/configuration/secrets` + 实测）：
 
 - `--secrets-file` 里没列出的密钥会**从上一个版本保留**，所以后续只改代码时直接 `npm run deploy` 不会丢密钥；`wrangler deploy` 也永远不会删密钥。
 - 反过来，`vars` 以 `wrangler.jsonc` 为准：**在控制台改过的明文变量会在下次 deploy 时被覆盖**，别在控制台改 `SITE_URL`。
-- 只想改单个密钥用 `npx wrangler secret put <KEY>`——注意它**会立刻创建并部署一个新版本**，6 个密钥逐条 put 就是 6 个版本，所以首次部署走 `--secrets-file`。
+- **`wrangler secret put` 在本项目上用不了**（实测 2026-10-02）：Vite 插件部署时会上传多个版本，`secret put` 因此认定「the latest version of your Worker isn't currently deployed」并拒绝写入。改单个值就走上面的 `--apply`，或者去控制台的 Variables and Secrets。
 - 还有一个 `secrets.required` 配置项（2026-03-24 新增）能让 deploy 前校验密钥齐不齐。**本仓库刻意不用**：一旦声明，`vite dev` 只会从 `.dev.vars` 加载列在里面的键，`SITE_URL` / `MOCK_SEND` / `DEV_HELPER` 会被排除，本地预览的链接就会指向生产域名。缺密钥时应用本身已经 fail-closed（`/api/auth/*` 与全部需登录接口 503 并列出缺哪几个），够用了。
 
 `init-owner.cjs` 用 `INSERT … ON CONFLICT DO NOTHING`，重跑不会碰业务状态；只有 `--reset-totp` 会换掉密钥、清空恢复码并 bump `session_epoch`。
@@ -138,7 +177,7 @@ node scripts/init-owner.cjs --remote             # 写 owner 行 + 生成 TOTP�
 
 ## 环境变量
 
-Secret 首次部署用 `wrangler deploy --secrets-file`（见上），之后改单个用 `wrangler secret put`；本地放 `.dev.vars`（已 gitignore，`db:seed` 会自动生成）。
+Secret 一律通过 `.secrets.json` + `wrangler deploy --secrets-file` 写入（见上；`wrangler secret put` 在本项目上会被平台拒掉）；本地放 `.dev.vars`（已 gitignore，`db:seed` 会自动生成）。
 
 | 名称 | 必需 | 缺失后果 |
 |---|---|---|
@@ -206,9 +245,10 @@ src/
   styles.css         Tailwind v4 @theme + 「维生监护仪 · 夜视」组件层
 scripts/
   seed-local.cjs     本地捏数据（9 个场景）+ 生成 .dev.vars
+  migrate.cjs        按序执行 migrations/*.sql（`--remote` 打到线上）；本地路径由 db:seed 顺带跑
   init-owner.cjs     生产 owner 行初始化 / --reset-totp
   _local.cjs         共用：wrangler D1 调用、北京墙钟、PBKDF2、TOTP
-migrations/          单个 0001_init.sql（全新建库，无迁移包袱）
+migrations/          0001_init.sql 建表 + 0002_final_second_message.sql 加 final_second_at
 docs/                backend.md · mobile-ui.md
 ```
 
@@ -232,7 +272,8 @@ TypeScript（strict）· Cloudflare Workers + D1 · Vite 8 + `@cloudflare/vite-p
 |---|---|
 | 每日无条件发链接、发新链接时物理删除全部旧链接 | 任何时候最多一条有效链接，没有「已使用」审计 |
 | 签到只能走当日链接 | 链接没送到就是当天签不了，可能误锁死；补偿只有重发 |
-| 锁死后任意签到自动恢复 | 撤销不了已发出的最终消息 |
+| 最终消息最多两条，之后彻底静默 | 误锁死时紧急联系人只会被打扰两次，但错过窗口的人只能靠那条 7 天恢复链接自救 |
+| 锁死后只有恢复链接能自救 | 撤销不了已发出的最终消息；链接过期即无从签到，只能重建库 |
 | 只有两条固定 cron | 非北京时区的用户看到的是本地 12:00/24:00 之外的时刻 |
 | 无签到历史 / 无投递记录 | 排查只能靠 cron 健康、心跳与 owner 行时间戳 |
 

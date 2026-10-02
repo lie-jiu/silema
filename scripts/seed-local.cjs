@@ -2,7 +2,7 @@
 "use strict";
 // 本地捏数据：重置本地 D1 → 建表 → 按场景写 owner / 接收人 / 令牌，并生成 .dev.vars。
 //   node scripts/seed-local.cjs --scenario=healthy
-//   场景：healthy | miss1 | miss2 | miss3 | locked | locked-pending | sendfail | fresh
+//   场景：healthy | miss1 | miss2 | locked | locked-pending | locked-silent | sendfail | fresh
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -17,7 +17,7 @@ const get = (name, dflt) => {
 const scenario = get("scenario", "today");
 const username = get("username", "admin");
 const password = get("password", "preview");
-const SCENARIOS = ["today", "healthy", "miss1", "miss2", "miss3", "locked", "locked-pending", "sendfail", "fresh"];
+const SCENARIOS = ["today", "healthy", "miss1", "miss2", "locked", "locked-pending", "locked-silent", "sendfail", "fresh"];
 if (!SCENARIOS.includes(scenario)) {
   console.error(`未知场景 ${scenario}，可选：${SCENARIOS.join(" | ")}`);
   process.exit(1);
@@ -36,7 +36,7 @@ L.runSql(
   `DROP TABLE IF EXISTS rate_limits; DROP TABLE IF EXISTS recipients;
    DROP TABLE IF EXISTS checkin_tokens; DROP TABLE IF EXISTS owner;`,
 );
-L.runSql(fs.readFileSync(path.join(root, "migrations", "0001_init.sql"), "utf8"));
+L.runMigrations();
 
 // ---- 场景化 owner ----
 console.log(`[2/4] 写入 owner（场景 ${scenario}）`);
@@ -49,6 +49,7 @@ const base = {
   last_checkin_at: bj(0, 12, 4),
   locked_at: null,
   final_sent_at: null,
+  final_second_at: null,
   last_send_at: bj(0, 12, 0),
   last_judge_at: bj(0, 0, 0),
   last_cron_at: bj(0, 12, 0),
@@ -61,12 +62,12 @@ const scenes = {
   healthy: base,
   miss1: { ...base, streak: 0, missed_streak: 1, last_checkin_at: bj(-1, 12, 6) },
   miss2: { ...base, streak: 0, missed_streak: 2, last_checkin_at: bj(-2, 12, 6) },
-  miss3: { ...base, streak: 0, missed_streak: 3, last_checkin_at: bj(-3, 12, 6) },
+  // 锁死发生在缺席第 3 天的 24:00，即「今天 00:00」；上次确认因此落在 4 天前
   locked: {
     ...base,
     state: "locked",
     streak: 0,
-    missed_streak: 4,
+    missed_streak: 3,
     last_checkin_at: bj(-4, 12, 6),
     locked_at: bj(0, 0, 0),
     final_sent_at: bj(0, 0, 5),
@@ -75,10 +76,20 @@ const scenes = {
     ...base,
     state: "locked",
     streak: 0,
-    missed_streak: 4,
+    missed_streak: 3,
     last_checkin_at: bj(-4, 12, 6),
     locked_at: bj(0, 0, 0),
     final_sent_at: null,
+  },
+  "locked-silent": {
+    ...base,
+    state: "locked",
+    streak: 0,
+    missed_streak: 3,
+    last_checkin_at: bj(-4, 12, 6),
+    locked_at: bj(0, 0, 0),
+    final_sent_at: bj(0, 0, 5),
+    final_second_at: bj(0, 12, 0),
   },
   sendfail: {
     ...base,
@@ -106,10 +117,10 @@ const scenes = {
 const o = scenes[scenario];
 L.runSql(
   `INSERT INTO owner (id, totp_secret, session_epoch, timezone, state, streak, missed_streak,
-     last_checkin_at, locked_at, final_sent_at, last_send_at, last_judge_at,
+     last_checkin_at, locked_at, final_sent_at, final_second_at, last_send_at, last_judge_at,
      last_cron_at, last_cron_status, last_cron_error)
    VALUES (1, ${L.sqlStr(secret)}, 1, 'Asia/Shanghai', ${L.sqlStr(o.state)}, ${o.streak}, ${o.missed_streak},
-     ${L.sqlNum(o.last_checkin_at)}, ${L.sqlNum(o.locked_at)}, ${L.sqlNum(o.final_sent_at)},
+     ${L.sqlNum(o.last_checkin_at)}, ${L.sqlNum(o.locked_at)}, ${L.sqlNum(o.final_sent_at)}, ${L.sqlNum(o.final_second_at)},
      ${L.sqlNum(o.last_send_at)}, ${L.sqlNum(o.last_judge_at)}, ${L.sqlNum(o.last_cron_at)},
      ${L.sqlStr(o.last_cron_status)}, ${L.sqlStr(o.last_cron_error)});`,
 );
@@ -141,10 +152,10 @@ if (scenario !== "fresh" && !scenario.startsWith("locked")) {
   push("待确认（今日链接）", "preview-live", "prompt", bj(0, 12, 0), liveExpire, null);
   push("今日已签到（已消费）", "preview-used", "prompt", bj(0, 12, 0), liveExpire, bj(0, 12, 4));
 }
-if (scenario === "miss2" || scenario === "miss3") {
+if (scenario === "miss2") {
   push("提醒链接（12h TTL）", "preview-reminder", "reminder", bj(-1, 16, 0), bj(-1, 16, 0) + 12 * 3600000, null);
 }
-if (scenario === "locked" || scenario === "locked-pending") {
+if (scenario.startsWith("locked")) {
   push("恢复链接（7 天）", "preview-recovery", "final", bj(0, 0, 0), bj(0, 0, 0) + 7 * 86400000, null);
 }
 push("测试链接（点它不会签到）", "preview-test", "test", now - 60000, now + 5 * 60000, null);
@@ -203,7 +214,7 @@ ${tokenRows.map((r) => `  ${pad(r.label)}http://localhost:5173/c/${r.token}`).jo
 
 假投递收件箱  http://localhost:5173/dev/outbox   （MOCK_SEND=1，所有发送只记不发）
 手动触发 cron curl -X POST "http://localhost:5173/__cron?job=send&force=1" -H "X-Cron-Secret: ${cronSecret}"
-换场景        node scripts/seed-local.cjs --scenario=miss3   （可选：${SCENARIOS.join(" | ")}）
+换场景        node scripts/seed-local.cjs --scenario=locked   （可选：${SCENARIOS.join(" | ")}）
 ============================================================
 从手机访问：npm run dev -- --host，再用日志里的 Network 地址，并把 .dev.vars 的 SITE_URL 改成同一地址。
 `);

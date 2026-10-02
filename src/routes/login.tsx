@@ -92,7 +92,7 @@ export function LoginPage(props: {
           </details>
         </div>
 
-        <button type="submit" class="btn btn-primary w-full mt-3 htmx-indicator">
+        <button type="submit" class="btn btn-primary w-full mt-3">
           <span class="btn-spinner" aria-hidden="true"></span>
           登录
         </button>

@@ -55,14 +55,22 @@ document.addEventListener("click", async (e) => {
       headers: { "HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded" },
       body: btn.getAttribute("data-post-body") ?? "",
     });
-    if (dlg instanceof HTMLDialogElement) dlg.close();
-    if (!res.ok) {
+    const failMsg = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 200);
+    if (failMsg) {
+      // 失败绝不能只是「对话框关掉、什么都没发生」：保持打开并把原因写进对话框内的槽位。
       delete btn.dataset.busy;
       btn.disabled = false;
-      const slot = document.querySelector(`[data-error-for="${btn.id}"]`);
-      if (slot) slot.textContent = (await res.text()).slice(0, 200);
+      const slot =
+        document.querySelector(`[data-error-for="${btn.id}"]`) ?? (dlg ? dlg.querySelector("[data-error]") : null);
+      if (slot) {
+        slot.textContent = failMsg;
+        slot.hidden = false;
+      } else {
+        window.alert(failMsg);
+      }
       return;
     }
+    if (dlg instanceof HTMLDialogElement) dlg.close();
     const target = btn.getAttribute("data-post-go") || location.pathname;
     const go = new URL(target, location.origin);
     // 服务端把「名单变更告知」的结果放在这个响应头里，跳转前并回 query 才能在下一页如实显示

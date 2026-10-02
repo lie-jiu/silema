@@ -120,7 +120,7 @@ export function validateConfig(type: ChannelType, config: Record<string, unknown
     if (!f.optional && !value) errors.push(`${f.label} 不能为空`);
     if (f.kind === "url" && value && !/^https?:\/\//i.test(value)) errors.push(`${f.label} 必须是 http(s) 地址`);
     if (f.kind === "numeric" && value && !/^[0-9:.-]+$/.test(value)) errors.push(`${f.label} 只能是数字`);
-    // 收件地址写错的代价是当日链接静默发不出去 → 连吃 3 天提醒后误锁死，所以入库前就拦。
+    // 收件地址写错的代价是当日链接静默发不出去 → 连吃 2 天提醒后误锁死，所以入库前就拦。
     if (f.kind === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       errors.push(`${f.label} 不是合法邮箱地址`);
     }

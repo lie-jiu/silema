@@ -202,12 +202,21 @@ function CheckedView(props: { owner: OwnerRow }): ReturnType<FC> {
 
 /** 「已失效」= 今天无从签到，必须给后台入口；与上一态绝不共用文案。 */
 function InvalidView(props: { owner: OwnerRow }): ReturnType<FC> {
+  const locked = props.owner.state === "locked";
   return (
     <div class="flex flex-col min-h-screen px-6">
       <div class="flex-1 flex items-center">
         <div class="w-full">
           <Pulse class="mb-8" />
-          <Result tone="danger" title="链接已失效" desc="这条链接只在当天有效。去后台可以重发今天的链接，或检查通知通道。">
+          <Result
+            tone="danger"
+            title="链接已失效"
+            desc={
+              locked
+                ? "系统已锁死，锁定期不再发出任何新链接，而这条恢复链接已经过期。"
+                : "这条链接只在当天有效。去后台可以重发今天的链接，或检查通知通道。"
+            }
+          >
             <a href="/admin" class="btn btn-ghost w-full">
               打开后台
             </a>

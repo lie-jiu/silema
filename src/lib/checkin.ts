@@ -94,6 +94,7 @@ function missingOwner(now: number): OwnerRow {
     last_checkin_at: null,
     locked_at: null,
     final_sent_at: null,
+    final_second_at: null,
     last_send_at: null,
     last_judge_at: now,
     last_cron_at: null,

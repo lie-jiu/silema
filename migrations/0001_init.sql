@@ -10,10 +10,10 @@ CREATE TABLE owner (
   timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
   state TEXT NOT NULL DEFAULT 'normal' CHECK (state IN ('normal','locked')),
   streak INTEGER NOT NULL DEFAULT 0,          -- 连续签到天数（展示）
-  missed_streak INTEGER NOT NULL DEFAULT 0,   -- 连续未签到天数（锁死=4）
+  missed_streak INTEGER NOT NULL DEFAULT 0,   -- 连续未签到天数（满 3 天锁死，见 0002）
   last_checkin_at INTEGER,
   locked_at INTEGER,
-  final_sent_at INTEGER,                      -- 最终消息送达时刻；NULL = 未送达，locked 态每日重发
+  final_sent_at INTEGER,                      -- 第一条最终消息送达时刻；NULL = 未送达，每日 12:00 重试
   last_send_at INTEGER,
   last_judge_at INTEGER NOT NULL,             -- init-owner 写入部署时刻，判定窗口起点永不为 NULL
   last_cron_at INTEGER,

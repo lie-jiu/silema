@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite build && wrangler dev",
-    "db:init": "wrangler d1 execute silema --local --file=./migrations/0001_init.sql",
+    "db:init": "node scripts/migrate.cjs",
     "db:seed": "node scripts/seed-local.cjs",
-    "setup": "wrangler d1 execute silema --local --file=./migrations/0001_init.sql && node scripts/seed-local.cjs",
+    "setup": "node scripts/seed-local.cjs",
     "test": "vitest run",
     "deploy": "vite build && wrangler deploy"
   },

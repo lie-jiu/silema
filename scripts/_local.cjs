@@ -30,6 +30,14 @@ function runSql(sql, { local = true } = {}) {
   }
 }
 
+/** 按文件名顺序执行 migrations/ 下全部 .sql（seed 与 `npm run db:init` 共用）。 */
+function runMigrations({ local = true } = {}) {
+  const dir = path.join(__dirname, "..", "migrations");
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+    runSql(fs.readFileSync(path.join(dir, file), "utf8"), { local });
+  }
+}
+
 function query(sql, { local = true } = {}) {
   const out = wrangler([
     "d1",
@@ -180,6 +188,7 @@ module.exports = {
   DB_NAME,
   TZ,
   runSql,
+  runMigrations,
   query,
   sqlStr,
   sqlNum,
