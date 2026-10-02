@@ -298,6 +298,22 @@ function safeNext(target: string): string {
   return target.startsWith("/admin") || target === "/" ? target : "/admin";
 }
 
+/**
+ * 需登录的接口。**必须在这些 handler 注册之前**挂中间件**：Hono 按注册顺序执行匹配链，
+ * 先命中的 handler 一旦返回响应，后注册的 `app.use` 对该路径根本不会执行（已实测）。
+ * `/api/auth/login` 与 `/api/auth/logout` 刻意保持公开，不在此列。
+ */
+for (const path of [
+  "/api/recipients",
+  "/api/recipients/*",
+  "/api/settings",
+  "/api/cron/resend",
+  "/api/auth/logout-all",
+  "/api/auth/backup-codes",
+]) {
+  app.use(path, requireAuth());
+}
+
 app.post("/api/auth/logout", (c) => {
   c.header("Set-Cookie", clearSessionCookie());
   if (wantsHtmx(c)) {
@@ -344,22 +360,11 @@ app.post("/api/auth/backup-codes", async (c) => {
   );
 });
 
-// ---- 需登录的页面与接口 ----
+// ---- 需登录的页面 ----
 app.use("/admin/*", async (c, next) => {
   if (c.req.path === "/admin/login") return next();
   return requireAuth()(c, next);
 });
-
-for (const path of [
-  "/api/recipients",
-  "/api/recipients/*",
-  "/api/settings",
-  "/api/cron/resend",
-  "/api/auth/logout-all",
-  "/api/auth/backup-codes",
-]) {
-  app.use(path, requireAuth());
-}
 
 async function renderDashboard(c: Context<{ Bindings: Bindings; Variables: Variables }>, flashKey?: string) {
   const now = Date.now();
@@ -615,7 +620,10 @@ async function deleteRecipientHandler(c: Context<{ Bindings: Bindings; Variables
   }
   // 快照必须在 DELETE 之前：被移除那位自己正是最需要知道的人
   const prevFinal = existing.on_final === 1 ? await finalRecipients(c.env.DB) : [];
-  await deleteRecipient(c.env.DB, id);
+  if (!(await deleteRecipient(c.env.DB, id))) {
+    // 事前 countFinal 与 DELETE 之间被并发请求抢先移走最后一位时，条件写入不会落。
+    return c.text("至少需要保留一位紧急联系人。要删除这一位，请先指定另一位接收「最终消息」。", 409);
+  }
   const outcome: NoticeOutcome = prevFinal.length
     ? await notifyContactChange(
         c.env,
@@ -661,7 +669,7 @@ async function updateRecipientHandler(c: Context<{ Bindings: Bindings; Variables
         : "";
   const prevFinal = change ? await finalRecipients(c.env.DB) : [];
 
-  await updateRecipient(c.env.DB, {
+  const saved = await updateRecipient(c.env.DB, {
     ...existing,
     label: v.label,
     channel_type: v.channelType,
@@ -672,6 +680,14 @@ async function updateRecipientHandler(c: Context<{ Bindings: Bindings; Variables
     reminder_content: v.reminderContent,
     final_content: v.finalContent,
   });
+  if (!saved) {
+    // 条件写入没落 = 并发里最后一位紧急联系人已被退订；库里没改动，所以也不通知任何人。
+    errors.push("至少需要保留一位紧急联系人");
+    return c.html(
+      <RecipientEditPage row={existing} type={v.channelType} config={merged} masked values={v} errors={errors} fieldErrors={{}} />,
+      400,
+    );
+  }
 
   const now = Date.now();
   const outcome: NoticeOutcome = change

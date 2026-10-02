@@ -71,11 +71,16 @@ export async function insertRecipient(
   return (res.meta?.last_insert_rowid as number) ?? 0;
 }
 
-export async function updateRecipient(db: D1Database, row: RecipientRow): Promise<void> {
-  await db
+/**
+ * 更新。「至少保留一位紧急联系人」折进同一条语句的 WHERE，返回 false 表示条件不满足
+ * （并发里另一个请求已经把最后一位退掉了）。调用方据此回 400，不能只靠事前的 countFinal 预检查。
+ */
+export async function updateRecipient(db: D1Database, row: RecipientRow): Promise<boolean> {
+  const res = await db
     .prepare(
       `UPDATE recipients SET label=?, channel_type=?, config_json=?, on_prompt=?, on_final=?,
-        prompt_content=?, reminder_content=?, final_content=? WHERE id=?`,
+        prompt_content=?, reminder_content=?, final_content=?
+       WHERE id=? AND (? = 1 OR on_final = 0 OR (SELECT COUNT(*) FROM recipients WHERE on_final = 1) > 1)`,
     )
     .bind(
       row.label,
@@ -87,10 +92,20 @@ export async function updateRecipient(db: D1Database, row: RecipientRow): Promis
       row.reminder_content,
       row.final_content,
       row.id,
+      row.on_final,
     )
     .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
-export async function deleteRecipient(db: D1Database, id: number): Promise<void> {
-  await db.prepare("DELETE FROM recipients WHERE id = ?").bind(id).run();
+/** 删除，同 `updateRecipient` 用单条条件语句守住不变量；返回 false = 这是最后一位紧急联系人。 */
+export async function deleteRecipient(db: D1Database, id: number): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `DELETE FROM recipients
+       WHERE id=? AND (on_final = 0 OR (SELECT COUNT(*) FROM recipients WHERE on_final = 1) > 1)`,
+    )
+    .bind(id)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
