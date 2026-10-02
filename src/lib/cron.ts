@@ -49,7 +49,7 @@ async function recordJudge(db: D1Database, now: number): Promise<void> {
 /**
  * 并发保护：判定写入一律带 `WHERE last_checkin_at IS NULL OR last_checkin_at < :windowStart`。
  * affected rows = 0 说明期间发生了签到，整体放弃本次判定、不发任何消息——否则午夜前后的点击
- * 会被随后落库的判定覆盖成 locked，而最终消息不可撤回（docs/backend.md §2.2 step 5）。
+ * 会被随后落库的判定覆盖成 locked，而最终消息不可撤回（docs/backend.md §2.2 step 6）。
  */
 async function conditionalUpdate(db: D1Database, sql: string, params: unknown[], windowStart: number) {
   return writeWithRetry("判定写入", () =>
@@ -210,7 +210,8 @@ export async function runSend(env: Env, opts: { force?: boolean; now?: number } 
 /**
  * 锁死后的最终消息投递——两条都由这里发，判定任务一条都不发（§2.1 步 0）。
  * 第一条失败时这次的成功算「补发」而不是第二条，所以**失败不消耗名额**、次日 12:00 继续重试；
- * 只有 `final_second_at` 落库后系统才彻底静默。
+ * 只有 `final_second_at` 落库后系统才彻底静默。两条之间还有一道 12 小时护栏，
+ * 挡住手动触发把两条烧进同一小时。
  * 不碰 `last_send_at`——那个时间戳只表示「今天的签到链接发出去了」，混进来会让恢复后的读数说谎。
  */
 async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise<CronSummary> {
@@ -236,6 +237,24 @@ async function runFinalFollowup(env: Env, owner: OwnerRow, now: number): Promise
       ran: false,
       job: "send",
       skipped: "锁死后检测到签到，未发送第二条最终消息",
+      sent: 0,
+      failed: 0,
+      detail: "跳过",
+      error: null,
+    };
+  }
+
+  // 两条最终消息必须落在不同的 12:00。locked 分支在 12h 幂等守卫**之前**分流（那个守卫管的是
+  // 日常链接），所以手动 `POST /__cron?job=send` 不受它约束：少了这一条，锁定期连点两次就会把
+  // 相隔一天的两条塌成同一小时内连发，然后 `final_second_at` 落库、系统永久静默——
+  // 而第二条的存在意义正是给 owner 一整个白天去撤销第一条。
+  if (owner.final_sent_at != null && now - owner.final_sent_at < GUARD_MS) {
+    await ping(env, "send", true);
+    await housekeeping(db, now);
+    return {
+      ran: false,
+      job: "send",
+      skipped: `第一条最终消息送达不足 12 小时（${fmtClock(owner.timezone, owner.final_sent_at)}），第二条留到下一个 12:00`,
       sent: 0,
       failed: 0,
       detail: "跳过",
@@ -303,7 +322,7 @@ export async function runJudge(env: Env, opts: { force?: boolean; now?: number }
   await voidDayLinks(db, now);
 
   // 健康判定必须在更新 last_judge_at 之前求值：条件是 last_send_at 落在本次窗口内，
-  // 不是「早于 last_judge_at」——正常情况下 send 12:00、judge 24:00，后者会每天误报（§2.2 step 6）。
+  // 不是「早于 last_judge_at」——正常情况下 send 12:00、judge 24:00，后者会每天误报（§2.2 step 7）。
   const sentInWindow = owner.last_send_at != null && owner.last_send_at >= windowStart && owner.last_send_at < now;
   const missingSend = sentInWindow
     ? null
@@ -416,7 +435,7 @@ async function stillAbsent(db: D1Database, windowStart: number): Promise<boolean
 }
 
 /**
- * 期间发生了签到：放弃本次判定、不发任何消息，也不回滚已经写下的东西（§2.2 step 5）。
+ * 期间发生了签到：放弃本次判定，也不回滚已经写下的东西（§2.2 step 6）。
  * 但这一次任务确实跑到了，所以照常推进 last_judge_at 并喂狗——窗口起点前移是安全的，
  * 那次签到落在旧窗口内，新窗口要求一次新的签到。
  */
