@@ -11,7 +11,7 @@ export function LoginPage(props: {
 }): ReturnType<FC> {
   const form = (
     <div id="login-form" class="px-6 pt-8 pb-10"><div class="pt-safe"></div>
-      <header class="text-center mb-8 rise" style={{ "--i": 0 }}>
+      <header class="text-center mb-8 rise" style={{ "--i": "0" }}>
         <div class="ecg mb-6"></div>
         <div class="micro mb-2.5">SILEMA · CONSOLE</div>
         <h1 class="text-num font-semibold tracking-tight">死了吗</h1>
@@ -19,21 +19,21 @@ export function LoginPage(props: {
       </header>
 
       {props.reason === "expired" ? (
-        <div class="mb-4 rise" style={{ "--i": 1 }}>
+        <div class="mb-4 rise" style={{ "--i": "1" }}>
           <Notice tone="warn" title="会话已结束">
             登录已过期，或在其他设备登录（本站是单会话）。
           </Notice>
         </div>
       ) : null}
       {props.error ? (
-        <div class="mb-4 rise" style={{ "--i": 1 }}>
+        <div class="mb-4 rise" style={{ "--i": "1" }}>
           <Notice tone="danger" title="登录失败">
             {props.error}
           </Notice>
         </div>
       ) : null}
 
-      <form hx-post="/api/auth/login" hx-target="#login-form" hx-swap="outerHTML" class="flex flex-col gap-4 rise" style={{ "--i": 2 }} novalidate>
+      <form hx-post="/api/auth/login" hx-target="#login-form" hx-swap="outerHTML" class="flex flex-col gap-4 rise" style={{ "--i": "2" }} novalidate>
         <input type="hidden" name="next" value={props.next ?? "/admin"} />
 
         <div>

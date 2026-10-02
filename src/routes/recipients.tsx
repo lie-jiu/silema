@@ -269,7 +269,7 @@ export function RecipientEditPage(props: {
               hx-post="/api/recipients/fields"
               hx-include="#recipient-form"
               hx-target="#channel-fields"
-              hx-swap="innerHTML"
+              hx-swap="innerHTML settle:240ms"
               class="btn btn-ghost h-11 px-4 text-body"
             >
               载入该通道的字段
@@ -364,7 +364,7 @@ export function RecipientEditPage(props: {
                 type="button"
                 hx-post={`/api/recipients/${props.row.id}/test`}
                 hx-target="#test-result"
-                hx-swap="innerHTML"
+                hx-swap="innerHTML settle:240ms"
                 class="btn btn-primary flex-1 h-11 text-body"
               >
                 发送

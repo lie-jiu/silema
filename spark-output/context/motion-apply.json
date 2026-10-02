@@ -1,0 +1,111 @@
+{
+  "skill": "motion-apply",
+  "project_name": "silema",
+  "generated_at": "2026-10-02T00:00:00+08:00",
+  "framework": {
+    "name": "Hono JSX SSR + htmx 2 + Tailwind CSS 4 + Vite 8 (Cloudflare Workers)",
+    "is_react": false,
+    "source": "package.json dependencies（无 react/react-dom；.tsx 是 Hono JSX 而非 React）"
+  },
+  "scene": {
+    "value": "DASHBOARD",
+    "source": "flow-mobile.json navigation.shells（后台管理台 3 Tab）+ 单人打卡工具语义",
+    "intensity_ceiling": "subtle/functional",
+    "hard_constraints_from_upstream": [
+      "docs/mobile-ui.md §9：禁止 confetti/粒子，情绪基调克制",
+      "docs/mobile-ui.md §1.5：mobile_rules.forbidden 含 hover/tooltip → 不得用 hover 门控动效"
+    ]
+  },
+  "personality_applied": {
+    "archetype": "Corporate（ restrained 仪器风：夜视监护仪）",
+    "source": "sniff-fallback（无 motion-plan.json；从 src/styles.css 既有动效层反推）",
+    "signature_easing": "cubic-bezier(0.22, 1, 0.36, 1)",
+    "duration_palette": { "micro": "0.14-0.2s", "standard": "0.24s", "entrance": "0.42-0.5s", "stagger": "70ms" }
+  },
+  "path_decisions": [
+    {
+      "target": "<dialog> 开合（删除确认 / 重发链接 / 恢复码 / 注销设备 / 测试发送，共 5 处）",
+      "path": "直接写 CSS（Phase 0a）",
+      "reason": "非 React 项目，React Bits 组件不可用；原生 dialog 的开合本就该由 CSS transition + @starting-style + allow-discrete 解决，引入 JS 反而更重",
+      "why_not_component": "Hono JSX SSR 无组件树可挂载，且 CSP script-src 'self' 禁内联脚本"
+    },
+    {
+      "target": "后台各屏面板上电序（dashboard / health / settings / recipients）",
+      "path": "直接写 CSS（Phase 0a）",
+      "reason": "既有 .rise 已有 70ms stagger 机制，只是后台四屏从未传 --i；用 nth-child 排期即可，不需要 prop 管线",
+      "why_not_component": "纯入场时序问题，组件化只会增加依赖"
+    },
+    {
+      "target": "htmx 换入内容（#tz-result / #test-result / #channel-fields / #checkin-stage）",
+      "path": "直接写 CSS + htmx 既有钩子（Phase 0a）",
+      "reason": "htmx 自带 .htmx-added 类是官方 CSS 扩展点；配合各 hx-swap 的 settle:240ms 即可，零新增脚本",
+      "why_not_component": "SSR 片段由服务端渲染，客户端组件无处挂载"
+    }
+  ],
+  "installed_components": [],
+  "peer_dependency_impact": "无新增依赖（node_modules 未变动）",
+  "css_snippets": [
+    {
+      "file": "src/styles.css",
+      "name": "dialog 开合",
+      "what": "dialog[open] 淡入 + 上移 12px/scale .985 落位（0.18s/0.24s），::backdrop 同步淡入；关闭靠 display/overlay 的 allow-discrete 离散过渡把退场跑完再消失",
+      "scene_compliance_passed": true,
+      "measured": "开：opacity 0.446→1、backdrop 0.345 途中值；关：1→0.78→0.58→0.38→0.23→0.11→0（180ms），display 全程 block 至 240ms 离散步才 none"
+    },
+    {
+      "file": "src/styles.css",
+      "name": "上电序 nth-child 排期",
+      "what": ".p-4 > .rise:nth-child(2..6) 依次 70/140/210/280/350ms，n+7 封顶 420ms",
+      "scene_compliance_passed": true,
+      "measured": "dashboard 4 块：0s/0.07s/0.14s/0.21s（改前是 0/0.07/0.28/0.35，条件卡缺席留 210ms 空洞）"
+    },
+    {
+      "file": "src/styles.css",
+      "name": "swapIn + htmx-added",
+      "what": "换入片段淡入 + 上浮 6px（0.2s）；:not(.rise):not(.roll) 守卫避免抢走既有上电序；#checkin-stage 是 display:contents，动画打在它的视图根上",
+      "scene_compliance_passed": true,
+      "measured": "时区切换实链路：0ms opacity 0.18 running → 120ms 0.99 → 250ms 类被 htmx 摘除且动画已完成（settle:240ms > 200ms，不弹回）"
+    },
+    {
+      "file": "src/styles.css",
+      "name": "alertEdge（危险提示条一次描边）",
+      "what": ".alert-flash::after 一次性 box-shadow 描边亮起（0.7s，峰值 28%），走伪元素因此不与父元素 animation 抢声明",
+      "scene_compliance_passed": true,
+      "measured": "注入 .alert-flash 节点后 getAnimations(subtree) 返回 alertEdge:running；结束态为透明描边即常态"
+    }
+  ],
+  "files_touched": [
+    "src/styles.css",
+    "src/ui/kit.tsx",
+    "src/routes/checkin.tsx",
+    "src/routes/login.tsx",
+    "src/routes/settings.tsx",
+    "src/routes/dashboard.tsx",
+    "src/routes/health.tsx",
+    "src/routes/recipients.tsx"
+  ],
+  "bugs_found_while_measuring": [
+    {
+      "finding": "Hono JSX 给数字 style 值补 px，`style={{ \"--i\": 2 }}` 序列化为 `--i: 2px`，使 calc(2px * 70ms) 非法 → animation-delay 回落 0s",
+      "blast_radius": "login.tsx 与 checkin.tsx 的上电序 stagger 此前从未生效（既存 bug，非本次引入）",
+      "fix": "所有 --i 改为字符串；实测 --i:\"2\" → animation-delay 0.14s"
+    },
+    {
+      "finding": "prefers-reduced-motion 全局块的 `*::before/*::after` 覆盖不到 ::backdrop",
+      "fix": "选择器列表补 dialog::backdrop"
+    }
+  ],
+  "verification": {
+    "typecheck": "npx tsc --noEmit 无输出",
+    "build": "vite build 成功（425.20 kB / gzip 118.60 kB）",
+    "browser_live": "localhost:5174 真实链路量测（getAnimations + getComputedStyle），时区改动已恢复 Asia/Shanghai 并验证回显",
+    "tests": "未跑：项目自身无测试文件；vitest 因 dev server 占用 vite 配置槽报 'already a server associated with the config'，与本次改动无关",
+    "reduced_motion": "全局块含 dialog::backdrop，duration !important 覆盖新增 transition",
+    "scene_self_check_LOCKED7": "无新增 infinite / 无持续 @keyframes / 入场 ≤0.7s / translate ≤12px / scale ≤1.05 / 无 rotate"
+  },
+  "profile_path": "spark-output/profile/motion-apply.md",
+  "downstream": {
+    "recommended": "check（/设计走查）做动效合规走查",
+    "handoff_fields": ["css_snippets[].scene_compliance_passed", "path_decisions", "bugs_found_while_measuring"]
+  }
+}

@@ -472,6 +472,27 @@
   animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(var(--i, 0) * 70ms);
 }
+/* 后台各屏的面板是同一容器里的平级兄弟，按 DOM 位置排期比逐个传 --i 可靠：
+   LOCKDOWN / 发送失败 / 初始化这些卡是按状态条件渲染的，写死的序号在它们缺席时
+   会在序列里留出 200ms 以上的空洞，读起来像卡了一下。 */
+.p-4 > .rise:nth-child(2) {
+  animation-delay: 70ms;
+}
+.p-4 > .rise:nth-child(3) {
+  animation-delay: 140ms;
+}
+.p-4 > .rise:nth-child(4) {
+  animation-delay: 210ms;
+}
+.p-4 > .rise:nth-child(5) {
+  animation-delay: 280ms;
+}
+.p-4 > .rise:nth-child(6) {
+  animation-delay: 350ms;
+}
+.p-4 > .rise:nth-child(n + 7) {
+  animation-delay: 420ms;
+}
 @keyframes roll {
   from {
     opacity: 0;
@@ -491,10 +512,94 @@
   transition: opacity 0.2s;
 }
 
+/* htmx 换入的片段：旧内容已由 .hx-swapping 压暗，新内容补一段自身淡入。
+   :not() 是必要的——#login-form 等目标自带 .rise，两条 animation 声明会互相覆盖，
+   让 htmx 的临时类抢走 .rise 反而破坏上电序。
+   依赖各 hx-swap 上的 settle:240ms：htmx 在 settle 时刻摘掉 .htmx-added，默认只有 20ms。 */
+@keyframes swapIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.htmx-added:not(.rise):not(.roll) {
+  animation: swapIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* #checkin-stage 是 display:contents（只为 htmx 提供 outerHTML swap 锚点），
+   自身不生成盒子，动画必须打在它的视图根上。 */
+#checkin-stage.htmx-added > * {
+  animation: swapIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 危险提示条：每次出现描边亮一次就熄（监护仪报警），绝不循环。
+   走 ::after 而不是元素本体，避免和上面 .htmx-added 的 animation 抢声明。 */
+@keyframes alertEdge {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 95 95 / 0);
+  }
+  28% {
+    box-shadow: 0 0 0 3px rgb(255 95 95 / 0.24);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 95 95 / 0);
+  }
+}
+.alert-flash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: alertEdge 0.7s ease-out both;
+}
+
+/* --------------------------------------------------------- 对话框开合 */
+/* 原生 <dialog> 的 showModal()/close() 是瞬时的。入场靠 @starting-style，
+   退场靠 allow-discrete 让 display/overlay 参与过渡（离散属性在过渡结束才生效）。
+   不支持这两个特性的浏览器会忽略对应声明，退回「瞬时开合」而不是打不开的弹窗。 */
+dialog {
+  opacity: 0;
+  transform: translateY(12px) scale(0.985);
+  transition:
+    opacity 0.18s ease-out,
+    transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    display 0.24s allow-discrete,
+    overlay 0.24s allow-discrete;
+}
+dialog[open] {
+  opacity: 1;
+  transform: none;
+}
+dialog::backdrop {
+  opacity: 0;
+  transition:
+    opacity 0.24s ease-out,
+    display 0.24s allow-discrete,
+    overlay 0.24s allow-discrete;
+}
+dialog[open]::backdrop {
+  opacity: 1;
+}
+@starting-style {
+  dialog[open],
+  dialog[open]::backdrop {
+    opacity: 0;
+  }
+  dialog[open] {
+    transform: translateY(12px) scale(0.985);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* ::backdrop 不在 *::before/::after 的覆盖范围内，得单列——否则遮罩仍会淡 240ms */
   *,
   *::before,
-  *::after {
+  *::after,
+  dialog::backdrop {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

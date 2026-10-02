@@ -65,7 +65,7 @@ export function SettingsPage(props: {
       <div class="p-4 flex flex-col gap-3.5">
         <Card class="rise">
           <Label>时区</Label>
-          <form hx-post="/api/settings" hx-target="#tz-result" hx-swap="innerHTML" hx-trigger="change">
+          <form hx-post="/api/settings" hx-target="#tz-result" hx-swap="innerHTML settle:240ms" hx-trigger="change">
             {/* 原生 <select>：iOS/Android 都调起系统选择器，比自绘 wheel 更贴合平台习惯 */}
             <select name="timezone" class="field readout text-body">
               {tzOptions.map((tz) => (

@@ -24,7 +24,9 @@ export function Notice(props: { tone?: Tone; title?: string; children: Child }):
   const tone = props.tone ?? "neutral";
   return (
     <div
-      class={`relative pl-4 pr-3 py-2.5 rounded-field border text-label leading-relaxed ${NOTICE_SKIN[tone]}`}
+      class={`relative pl-4 pr-3 py-2.5 rounded-field border text-label leading-relaxed ${NOTICE_SKIN[tone]} ${
+        tone === "danger" ? "alert-flash" : ""
+      }`}
       role={tone === "danger" ? "alert" : undefined}
     >
       <span

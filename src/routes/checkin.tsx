@@ -61,13 +61,13 @@ function ConfirmView(
   const last = owner.last_checkin_at;
   return (
     <div class="flex flex-col min-h-screen">
-      <header class="pt-6 px-6 text-center rise" style={{ "--i": 0 }}>
+      <header class="pt-6 px-6 text-center rise" style={{ "--i": "0" }}>
         <Pulse live class="mb-6" />
         <div class="micro mb-2">SILEMA · 每日确认</div>
         <h1 class="text-num font-semibold tracking-tight">今天你还活着吗？</h1>
       </header>
 
-      <div class="mx-6 mt-7 rise" style={{ "--i": 1 }}>
+      <div class="mx-6 mt-7 rise" style={{ "--i": "1" }}>
         <div class="panel flex divide-x divide-ink/8 p-0 overflow-hidden">
           <Readout label="上次确认" value={last == null ? "从未" : fmtClock(owner.timezone, last)} />
           <Readout
@@ -84,13 +84,13 @@ function ConfirmView(
       </div>
 
       {/* 大圆位于视口 55-65%：主 CTA 不能落在拇指盲区（P1-6） */}
-      <div class="flex-1 flex flex-col items-center justify-center pt-[6vh] pb-4 rise" style={{ "--i": 2 }}>
+      <div class="flex-1 flex flex-col items-center justify-center pt-[6vh] pb-4 rise" style={{ "--i": "2" }}>
         <button
           type="button"
           data-hold-post
           hx-post={`/c/${props.token.token}/do`}
           hx-target="#checkin-stage"
-          hx-swap="outerHTML"
+          hx-swap="outerHTML settle:240ms"
           hx-trigger="hold"
           hx-disabled-elt="this"
           class="dial-host"
@@ -117,7 +117,7 @@ function ConfirmView(
         </noscript>
       </div>
 
-      <footer class="px-6 pb-safe pb-7 text-center rise" style={{ "--i": 3 }}>
+      <footer class="px-6 pb-safe pb-7 text-center rise" style={{ "--i": "3" }}>
         {props.token.purpose === "test" ? (
           <div class="mb-3 text-left">
             <Notice tone="warn">这是测试链接，按住确认不会记为今天的签到。</Notice>
