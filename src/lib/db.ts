@@ -46,10 +46,12 @@ export function checkedThisCycle(owner: OwnerRow): boolean {
 }
 
 export function setCronHealth(db: D1Database, at: number, status: "ok" | "error", error: string | null) {
-  return db
-    .prepare(
-      `UPDATE owner SET last_cron_at = ?, last_cron_status = ?, last_cron_error = ? WHERE id = 1`,
-    )
-    .bind(at, status, error)
-    .run();
+  return writeWithRetry("cron 健康记录", () =>
+    db
+      .prepare(
+        `UPDATE owner SET last_cron_at = ?, last_cron_status = ?, last_cron_error = ? WHERE id = 1`,
+      )
+      .bind(at, status, error)
+      .run(),
+  );
 }

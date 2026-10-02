@@ -1,5 +1,6 @@
 import { app } from "./app";
-import { parseCron, runJudge, runSend } from "./lib/cron";
+import { parseCron, ping, runJudge, runSend } from "./lib/cron";
+import { setCronHealth } from "./lib/db";
 import type { Env } from "./lib/send";
 
 export default {
@@ -12,7 +13,19 @@ export default {
       console.error(`[cron] 未识别的 cron 表达式：${controller.cron}`);
       return;
     }
-    const res = job === "send" ? await runSend(env) : await runJudge(env);
-    console.log(`[${job}]`, res.ran ? "ran" : `skipped: ${res.skipped ?? ""}`, res.detail, res.error ?? "");
+    try {
+      const res = job === "send" ? await runSend(env) : await runJudge(env);
+      console.log(`[${job}]`, res.ran ? "ran" : `skipped: ${res.skipped ?? ""}`, res.detail, res.error ?? "");
+    } catch (err) {
+      // 不兜住的话，一次 D1 抖动会同时让缺席计数、后台健康与外部告警失明（任务静默失败、无人知道）。
+      const msg = `[${job}] 未捕获异常：${String(err instanceof Error ? err.message : err).slice(0, 300)}`;
+      console.error(msg, err);
+      try {
+        await setCronHealth(env.DB, Date.now(), "error", msg);
+      } catch {
+        /* 连健康槽位都写不进去时，失败心跳照发 */
+      }
+      await ping(env, job, false);
+    }
   },
 };
