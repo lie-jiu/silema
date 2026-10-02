@@ -225,7 +225,7 @@
 // ===========================================================
 // STATE 注入点（chain-protocol §九 Step 6 由各 Skill 替换）
 // ===========================================================
-const STATE = /*__SPARK_STATE_INJECT__*/{"project":"silema","generated_at":"2026-10-02T00:00:00+08:00","contexts":{"flow-mobile":{"done":true,"summary":"4 flows / 13 屏 SSR+htmx 规格，docs/mobile-ui.md","fields":{"scenario":"Productivity / 习惯打卡（每日仪式 + Streak），管理台部分无 canonical 匹配","tech_stack":"H5 — Hono JSX SSR + htmx 2 + Tailwind CSS 4（antd-mobile 仅保留为 Shell B 的升级路径）"}},"motion-apply":{"done":true,"summary":"非 React → 全走原生 CSS：dialog 开合 / 后台上电序 / htmx 换入入场 + 危险条一次描边，8 文件，零新依赖","fields":{"framework":"Hono JSX SSR + htmx 2 + Tailwind 4（无 react，React Bits 不可用）","scene":"DASHBOARD（克制基调，禁 confetti/hover）","bonus":"量测时发现 --i 数字被补 px，login/签到页 stagger 此前从未生效"}}}};
+const STATE = /*__SPARK_STATE_INJECT__*/{"project":"silema","generated_at":"2026-10-02T16:28:35.419Z","contexts":{"flow-mobile":{"done":true,"summary":"6 个 flow / 19 屏 · 含公开状态页","fields":{}},"motion-apply":{"done":true,"summary":"motion-apply 已完成","fields":{}}}};
 
 // 默认空状态兜底（模板未被注入时仍可预览结构）
 const EFFECTIVE_STATE = STATE || {

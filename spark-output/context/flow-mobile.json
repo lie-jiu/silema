@@ -80,8 +80,51 @@
         { "page_id": "security", "name": "账号安全", "file_path": "docs/mobile-ui.md#screen-3--security", "main_action": "注销所有设备 / 查看 TOTP 恢复路径" }
       ],
       "exit_states": { "success": "时区原地回显；注销后回登录页", "error": "时区 400 inline；健康数据取不到时显示未知灰并标红，不默认绿", "abandon": "注销 Dialog 可取消" }
+    },
+    {
+      "name": "公开状态浏览",
+      "added_at": "2026-10-02",
+      "canonical_ref": "productivity.md Flow 4 Screen 1（Habits Dashboard 的只读公开版）",
+      "differences": [
+        "公开页绝不放签到入口：唯一入口是 /c/:token 长按，否则任何看到地址的人都能替你续命",
+        "受众是陌生人/紧急联系人而非本人，数据一律降到日期粒度",
+        "无 TabBar、无返回导航（Shell A 未鉴权单页），且刻意无 CTA"
+      ],
+      "entry": "手输域名 / 最终消息里的 {site} / 他人分享 → GET /（服务端按 owner 状态选屏，首屏即终态）",
+      "screens": [
+        { "page_id": "status-checked", "name": "今日已确认", "file_path": "docs/mobile-ui.md#62-screen-1--status-checked今日已确认", "main_action": "只读确认「安全」（streak + 上次确认日期 + Led ok）" },
+        { "page_id": "status-pending", "name": "今日未确认", "file_path": "docs/mobile-ui.md#63-screen-2--status-pending今日尚未确认", "main_action": "只读 + <details> 就地展开「如何完成今天的确认」" },
+        { "page_id": "status-uninitialized", "name": "系统尚未初始化", "file_path": "docs/mobile-ui.md#64-screen-3--status-uninitialized", "main_action": "无（空态不给 CTA）" }
+      ],
+      "exit_states": { "success": "status-checked", "error": "未初始化态 / D1 失败由 app.onError 全页兜底", "abandon": "读完即关闭，无需完成任何动作" }
+    },
+    {
+      "name": "联系人锁死求助",
+      "added_at": "2026-10-02",
+      "canonical_ref": "productivity.md 无对应 canonical；取 Flow 4 空/异常态的告警屏写法",
+      "differences": [
+        "锁死后才亮出缺席天数（锁死前显示=任何人可反推触发日，撞 README 威胁模型）",
+        "行动指引屏是全站唯一带 appbar 返回箭头的公开页 L2",
+        "恢复态独立成屏：只看到「今天已确认」会让联系人以为自己的告警是误报"
+      ],
+      "entry": "锁死后系统发出的最终消息含 {site} → 联系人点开 GET /（state=locked）",
+      "screens": [
+        { "page_id": "status-locked", "name": "锁死告警", "file_path": "docs/mobile-ui.md#65-flow-5b--联系人视角锁死--指引--已解除", "main_action": "读懂「连续缺席 N 天 / 最终消息已发出」→「我能帮什么」" },
+        { "page_id": "lock-guide", "name": "行动指引", "file_path": "docs/mobile-ui.md#65-flow-5b--联系人视角锁死--指引--已解除", "main_action": "现在就做 3 条 / 不要做 3 条（含「不要反复点开那条链接」）" },
+        { "page_id": "status-recovered", "name": "锁定已解除", "file_path": "docs/mobile-ui.md#65-flow-5b--联系人视角锁死--指引--已解除", "main_action": "只读中性回显，不庆祝、不说明谁触发" }
+      ],
+      "exit_states": { "success": "status-recovered（主人已用恢复链接撤销）", "error": "取不到 state 显示未知灰并标红，绝不默认绿", "abandon": "联系人看完指引离开，公开页不含任何联系方式" }
     }
   ],
+  "flow5_addendum": {
+    "date": "2026-10-02",
+    "spec_section": "docs/mobile-ui.md §6",
+    "prototype": "docs/flow-mobile/public-status/（npx vite，端口 5199；样式 @import src/styles.css 与线上同源；npx vite build 已通过，6 屏经浏览器实机截图核对）",
+    "new_component": ".ecg-flat —— 锁死态断线走线（--ecg-svg-flat 平线 data URI + danger drop-shadow），全站唯一新增 CSS 项",
+    "p1_found_in_prototype": "居中式（flex-1 items-center）在内容超过一屏时退化成贴顶，走线被状态栏压掉；修正为容器自带 pt-[calc(env(safe-area-inset-top)+1.5rem)]",
+    "privacy_rule": "两条硬边界：① 锁死前公开页禁止出现 missedStreak / MissedDots / 任何倒计时，锁死后才允许 N/LOCK_AT；② 全态禁止在公开页解释签到机制（发送时刻 / 一次性 / 令牌消费语义 / 解除路径），含 HTML 注释与 aria-label——这些属于发给指定联系人的私发消息。原稿里 pending 屏的 <details>「如何完成今天的确认」与 lock-guide 的「链接被消费过一次就失效」「让 TA 长按那条链接」已按此删除，指引改为「以你收到的那条消息为准」。",
+    "out_of_scope": ["登录入口链接", "OG / meta description 预览卡", "自动刷新（meta refresh 或 htmx 轮询）"]
+  },
   "design_tokens": {
     "colors": { "primary": "靛蓝（保守/安全设备基调）", "ok": "绿", "warn": "琥珀", "danger": "红", "usage": "主色只给唯一主操作，重发链接用 outlined" },
     "font_sizes": [12, 14, 16, 28],
